@@ -1,9 +1,21 @@
+.PHONY: deps
+
+all: deps compile
+
 compile:
-	erl -make
+	./rebar compile
+
+deps:
+	./rebar get-deps
 
 clean:
-	rm ebin/*.beam
+	./rebar clean
 
-run:
-	erl -pa ebin
+distclean: clean 
+	./rebar delete-deps
 
+eunit:
+	./rebar skip_deps=true eunit
+
+dialyzer: compile
+	@dialyzer -Wno_return --src src
