@@ -172,112 +172,128 @@ write_to_ets(Table, Postings) ->
 %% %% ===================================================================
 %% %% EUnit tests
 %% %% ===================================================================
-%% -ifdef(TEST).
+-ifdef(TEST).
 
-%% -ifdef(EQC).
+-ifdef(EQC).
 
-%% -define(QC_OUT(P),
-%%         eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
+-define(QC_OUT(P),
+        eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 
-%% -define(POW_2(N), trunc(math:pow(2, N))).
+-define(POW_2(N), trunc(math:pow(2, N))).
 
-%% -define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
+-define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
 
-%% g_iftv() ->
-%%     non_empty(binary()).
+g_iftv() ->
+    non_empty(binary()).
 
-%% g_props() ->
-%%     list({oneof([word_pos, offset]), choose(0, ?POW_2(31))}).
+g_i() ->
+    non_empty(binary()).
 
-%% g_tstamp() ->
-%%     choose(0, ?POW_2(31)).
+g_f() ->
+    non_empty(binary()).
 
-%% %% g_ift_range(IFTs) ->
-%% %%     ?SUCHTHAT({Start, End}, {oneof(IFTs), oneof(IFTs)}, End >= Start).
+g_t() ->
+    non_empty(binary()).
 
-%% fold_iterator(Itr, Fn, Acc0) ->
-%%     fold_iterator_inner(Itr(), Fn, Acc0).
+g_ift() ->
+    {g_i(), g_f(), g_t()}.
 
-%% fold_iterator_inner(eof, _Fn, Acc) ->
-%%     lists:reverse(Acc);
-%% fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
-%%     Acc = Fn(Term, Acc0),
-%%     fold_iterator_inner(NextItr(), Fn, Acc).
+g_value() ->
+    non_empty(binary()).
 
+g_props() ->
+    list({oneof([word_pos, offset]), choose(0, ?POW_2(31))}).
 
-%% prop_basic_test(Root) ->
-%%     ?FORALL(Entries, list({g_iftv(), g_iftv(), g_iftv(), g_iftv(), g_props(), g_tstamp()}),
-%%             begin
-%%                 %% Delete old files
-%%                 [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+g_tstamp() ->
+    choose(0, ?POW_2(31)).
 
-%%                 %% Create a buffer
-%%                 Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+g_ift_range(IFTs) ->
+    ?SUCHTHAT({{I1, F1, _T1}=Start, {I2, F2, _T2}=End},
+              {oneof(IFTs), oneof(IFTs)}, (End >= Start) andalso (I1 =:= I2) andalso (F1 =:= F2)).
 
-%%                 %% Filter the generated entries such that each {IFT, Value} is only present
-%%                 %% once and has the latest timestamp for that key
-%%                 F = fun({Index, Field, Term, Value, Props, Tstamp}, Acc) ->
-%%                             Key = {Index, Field, Term, Value},
-%%                             case orddict:find(Key, Acc) of
-%%                                 {ok, {_, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
-%%                                     orddict:store({Key, {Props, Tstamp}}, Acc);
-%%                                 error ->
-%%                                     orddict:store({Key, {Props, Tstamp}}, Acc);
-%%                                 _ ->
-%%                                     Acc
-%%                             end
-%%                     end,
-%%                 ExpectedEntries = [{Index, Field, Term, Value, Props, Tstamp} ||
-%%                                       {{Index, Field, Term, Value}, {Props, Tstamp}}
-%%                                           <- lists:foldl(F, [], Entries)],
+fold_iterator(Itr, Fn, Acc0) ->
+    fold_iterator_inner(Itr(), Fn, Acc0).
 
-%%                 %% Build a list of what was stored in the buffer
-%%                 ActualEntries = fold_iterator(mi_buffer:iterator(Buffer),
-%%                                               fun(Item, Acc0) -> [Item | Acc0] end, []),
-%%                 ?assertEqual(ExpectedEntries, ActualEntries),
-%%                 true
-%%             end).
+fold_iterator_inner(eof, _Fn, Acc) ->
+    lists:reverse(Acc);
+fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
+    Acc = Fn(Term, Acc0),
+    fold_iterator_inner(NextItr(), Fn, Acc).
 
-%% %% prop_iter_range_test(Root) ->
-%% %%     ?LET(IFTs, non_empty(list(g_iftv())),
-%% %%          ?FORALL({Entries, Range}, {list({oneof(IFTs), g_value(), g_props(), g_tstamp()}), g_ift_range(IFTs)},
-%% %%             begin
-%% %%                 %% Delete old files
-%% %%                 [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+fold_iterators([], _Fun, Acc) ->
+    lists:reverse(Acc);
+fold_iterators([Itr|Itrs], Fun, Acc0) ->
+    Acc = fold_iterator(Itr, Fun, Acc0),
+    fold_iterators(Itrs, Fun, Acc).
 
-%% %%                 %% Create a buffer
-%% %%                 Buffer = make_buffer(Entries, mi_buffer:new(Root ++ "_buffer")),
+prop_basic_test(Root) ->
+    ?FORALL(Entries, list({{g_iftv(), g_iftv(), g_iftv()}, g_iftv(), g_props(), g_tstamp()}),
+            begin
+                %% Delete old files
+                [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
 
-%% %%                 %% Identify those values in the buffer that are in the generated range
-%% %%                 {Start, End} = Range,
-%% %%                 RangeEntries = fold_iterator(iterator(Start, End, Buffer),
-%% %%                                              fun(Item, Acc0) -> [Item | Acc0] end, []),
+                %% Create a buffer
+                Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
 
-%% %%                 %% Verify that all IFTs within the actual entries satisfy the constraint
-%% %%                 ?assertEqual([], [IFT || {IFT, _, _, _} <- RangeEntries,
-%% %%                                          IFT < Start, IFT > End]),
+                %% Filter the generated entries such that each {IFT, Value} is only present
+                %% once and has the latest timestamp for that key
+                F = fun({{_Index, _Field, _Term}=Key, Value, Props, Tstamp}, Acc) ->
+                            case orddict:find(Key, Acc) of
+                                {ok, {_, _, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
+                                    orddict:store(Key, {Value, Props, Tstamp}, Acc);
+                                error ->
+                                    orddict:store(Key, {Value, Props, Tstamp}, Acc);
+                                _ ->
+                                    Acc
+                            end
+                    end,
+                ExpectedEntries = [{Index, Field, Term, Value, Props, Tstamp} ||
+                                      {{Index, Field, Term}, {Value, Props, Tstamp}}
+                                          <- lists:foldl(F, [], Entries)],
 
-%% %%                 %% Check that the count for the range matches the length of the returned
-%% %%                 %% range entries list
-%% %%                 ?assertEqual(length(RangeEntries), info(Start, End, Buffer)),
-%% %%                 true
-%% %%             end)).
+                %% Build a list of what was stored in the buffer
+                ActualEntries = fold_iterator(mi_buffer:iterator(Buffer),
+                                              fun(Item, Acc0) -> [Item | Acc0] end, []),
+                mi_buffer:delete(Buffer),
+                equals(ExpectedEntries, ActualEntries)
+            end).
 
+prop_iter_range_test(Root) ->
+    ?LET({I, F}, {g_i(), g_f()},
+         ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
+              ?FORALL({Entries, Range},
+                      {list({oneof(IFTs), g_value(), g_props(), g_tstamp()}), g_ift_range(IFTs)},
+                      begin check_range(Root, Entries, Range) end))).
 
-%% prop_basic_test_() ->
-%%     test_spec("/tmp/test/mi_buffer_basic", fun prop_basic_test/1).
+check_range(Root, Entries, Range) ->
+    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+    Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
 
-%% %% prop_iter_range_test_() ->
-%% %%     test_spec("/tmp/test/mi_buffer_iter", fun prop_iter_range_test/1).
+    {Start, End} = Range,
+    {Index, Field, StartTerm} = Start,
+    {Index, Field, EndTerm} = End,
+    Itrs = mi_buffer:iterators(Index, Field, StartTerm, EndTerm, all, Buffer),
+    L1 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
 
-%% test_spec(Root, PropertyFn) ->
-%%     {timeout, 60, fun() ->      
-%%                           application:load(merge_index),
-%%                           os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
-%%                           ?assert(eqc:quickcheck(eqc:numtests(250, ?QC_OUT(PropertyFn(Root ++ "/t1")))))
-%%                   end}.
+    L2 = [{V, K, P}
+          || {Ii, Ff, Tt, V, K, P} <- fold_iterator(mi_buffer:iterator(Buffer),
+                                                    fun(I,A) -> [I|A] end, []),
+             {Ii, Ff, Tt} >= Start, {Ii, Ff, Tt} =< End],
+    mi_buffer:delete(Buffer),
+    equals(lists:sort(L1), lists:sort(L2)).
 
+prop_basic_test_() ->
+    test_spec("/tmp/test/mi_buffer_basic", fun prop_basic_test/1).
 
+prop_iter_range_test_() ->
+    test_spec("/tmp/test/mi_buffer_iter", fun prop_iter_range_test/1).
 
-%% -endif. %EQC
-%% -endif.
+test_spec(Root, PropertyFn) ->
+    {timeout, 60, fun() ->
+                          application:load(merge_index),
+                          os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
+                          ?assert(eqc:quickcheck(eqc:numtests(250, ?QC_OUT(PropertyFn(Root ++ "/t1")))))
+                  end}.
+
+-endif. %EQC
+-endif.
