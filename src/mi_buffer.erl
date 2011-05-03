@@ -229,34 +229,27 @@ fold_iterators([Itr|Itrs], Fun, Acc0) ->
 prop_basic_test(Root) ->
     ?FORALL(Entries, list({{g_iftv(), g_iftv(), g_iftv()}, g_iftv(), g_props(), g_tstamp()}),
             begin
-                %% Delete old files
-                [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
-
-                %% Create a buffer
-                Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
-
-                %% Filter the generated entries such that each {IFT, Value} is only present
-                %% once and has the latest timestamp for that key
-                F = fun({{_Index, _Field, _Term}=Key, Value, Props, Tstamp}, Acc) ->
-                            case orddict:find(Key, Acc) of
-                                {ok, {_, _, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
-                                    orddict:store(Key, {Value, Props, Tstamp}, Acc);
-                                error ->
-                                    orddict:store(Key, {Value, Props, Tstamp}, Acc);
-                                _ ->
-                                    Acc
-                            end
-                    end,
-                ExpectedEntries = [{Index, Field, Term, Value, Props, Tstamp} ||
-                                      {{Index, Field, Term}, {Value, Props, Tstamp}}
-                                          <- lists:foldl(F, [], Entries)],
-
-                %% Build a list of what was stored in the buffer
-                ActualEntries = fold_iterator(mi_buffer:iterator(Buffer),
-                                              fun(Item, Acc0) -> [Item | Acc0] end, []),
-                mi_buffer:delete(Buffer),
-                equals(ExpectedEntries, ActualEntries)
+                check_entries(Root, Entries)
             end).
+
+prop_dups_test(Root) ->
+    ?FORALL(Entries, list(default({{<<0>>,<<0>>,<<0>>},<<0>>,[],0},
+                                  {{g_iftv(), g_iftv(), g_iftv()}, g_iftv(), g_props(), g_tstamp()})),
+            begin
+                check_entries(Root, Entries)
+            end).
+
+check_entries(Root, Entries) ->
+    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+    Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+
+    L1 = [{I, F, T, Value, Props, Tstamp}
+          || {{I, F, T}, Value, Props, Tstamp} <- Entries],
+
+    L2 = fold_iterator(mi_buffer:iterator(Buffer),
+                       fun(Item, Acc0) -> [Item | Acc0] end, []),
+    mi_buffer:delete(Buffer),
+    equals(lists:sort(L1), lists:sort(L2)).
 
 prop_iter_range_test(Root) ->
     ?LET({I, F}, {g_i(), g_f()},
@@ -284,6 +277,9 @@ check_range(Root, Entries, Range) ->
 
 prop_basic_test_() ->
     test_spec("/tmp/test/mi_buffer_basic", fun prop_basic_test/1).
+
+prop_dups_test_() ->
+    test_spec("/tmp/test/mi_buffer_basic", fun prop_dups_test/1).
 
 prop_iter_range_test_() ->
     test_spec("/tmp/test/mi_buffer_iter", fun prop_iter_range_test/1).
