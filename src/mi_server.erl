@@ -62,9 +62,7 @@ init([Root]) ->
     
     %% Load from disk...
     filelib:ensure_dir(join(Root, "ignore")),
-    io:format("Loading merge_index from '~s'~n", [Root]),
     {NextID, Buffer, Segments} = read_buf_and_seg(Root),
-    io:format("Finished loading merge_index from '~s'~n", [Root]),
 
     %% trap exits so compaction and stream/range spawned processes
     %% don't pull down this merge_index if they fail
@@ -96,12 +94,9 @@ init([Root]) ->
 read_buf_and_seg(Root) ->
     %% Delete any files that have a ?DELETEME_FLAG flag. This means that
     %% the system stopped before proper cleanup.
-    io:format("Cleaning up...~n"),
     F1 = fun(Filename) ->
         Basename = filename:basename(Filename, ?DELETEME_FLAG),
         Basename1 = filename:join(Root, Basename ++ ".*"),
-        io:format("Deleting '~s'~n", [Basename1]),
-        io:format("~p~n", [filelib:wildcard(Basename1)]),
         [ok = file:delete(X) || X <- filelib:wildcard(Basename1)]
     end,
     [F1(X) || X <- filelib:wildcard(join(Root, "*.deleted"))],
@@ -124,26 +119,22 @@ read_buf_and_seg(Root) ->
 read_segments([], _Segments) -> [];
 read_segments([SName|Rest], Segments) ->
     %% Read the segment from disk...
-    io:format("Opening segment: '~s'~n", [SName]),
     Segment = mi_segment:open_read(SName),
     [Segment|read_segments(Rest, Segments)].
 
 read_buffers(Root, [], NextID, Segments) ->
     %% No latest buffer exists, open a new one...
     BName = join(Root, "buffer." ++ integer_to_list(NextID)),
-    io:format("Opening new buffer: '~s'~n", [BName]),
     Buffer = mi_buffer:new(BName),
     {NextID + 1, Buffer, Segments};
 
 read_buffers(_Root, [{_BNum, BName}], NextID, Segments) ->
     %% This is the final buffer file... return it as the open buffer...
-    io:format("Opening buffer: '~s'~n", [BName]),
     Buffer = mi_buffer:new(BName),
     {NextID, Buffer, Segments};
 
 read_buffers(Root, [{BNum, BName}|Rest], NextID, Segments) ->
     %% Multiple buffers exist... convert them into segments...
-    io:format("Converting buffer: '~s' to segment.~n", [BName]),
     SName = join(Root, "segment." ++ integer_to_list(BNum)),
     set_deleteme_flag(SName),
     Buffer = mi_buffer:new(BName),
