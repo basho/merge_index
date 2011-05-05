@@ -21,10 +21,7 @@
     info/4,
     iterator/1,
     iterator/4,
-    iterators/6,
-
-    %% Used by QC tests, this is here to make compiler happy.
-    fold_iterator/3
+    iterators/6
 ]).
 
 -include("merge_index.hrl").
@@ -391,15 +388,6 @@ offsets_file(Segment) when is_record(Segment, segment) ->
 offsets_file(Root) ->
     Root ++ ".offsets".
 
-fold_iterator(Itr, Fn, Acc0) ->
-    fold_iterator_inner(Itr(), Fn, Acc0).
-
-fold_iterator_inner(eof, _Fn, Acc) ->
-    lists:reverse(Acc);
-fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
-    Acc = Fn(Term, Acc0),
-    fold_iterator_inner(NextItr(), Fn, Acc).
-
 %% expand_key/2 - Given a BaseKey and a shrunken Key, return
 %% the actual key by re-adding the field and term if
 %% encessary. Clauses ordered by most common first.
@@ -423,9 +411,6 @@ expand_key(_, {Index, Field, Term}) ->
 
 -define(POW_2(N), trunc(math:pow(2, N))).
 
-g_ift() ->
-    choose(0, ?POW_2(62)).
-
 g_i() ->
     non_empty(binary()).
 
@@ -444,30 +429,64 @@ g_props() ->
 g_tstamp() ->
     choose(0, ?POW_2(31)).
 
+get_count(Entries) ->
+    fun ({{I1, F1, T1}, _, _, _}) ->
+            Fun = fun({I2, F2, T2, _, _, _}) ->
+                          (I1 =:= I2) and (F1 =:= F2) and (T1 =:= T2)
+                  end,
+            length(lists:filter(Fun, Entries))
+    end.
+
+use_info(Segment) ->
+    fun ({{I, F, T}, _, _, _}) ->
+            mi_segment:info(I, F, T, Segment)
+    end.
+
+fold_iterator(Itr, Fn, Acc0) ->
+    fold_iterator_inner(Itr(), Fn, Acc0).
+
+fold_iterator_inner(eof, _Fn, Acc) ->
+    lists:reverse(Acc);
+fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
+    Acc = Fn(Term, Acc0),
+    fold_iterator_inner(NextItr(), Fn, Acc).
+
 prop_basic_test(Root) ->
-    ?FORALL(Entries, list({g_i(), g_f(), g_t(), g_value(), g_props(), g_tstamp()}),
+    ?FORALL(Entries, list({{g_i(), g_f(), g_t()}, g_value(), g_props(), g_tstamp()}),
             begin
-                %% Delete old files
                 [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
 
-                %% Setup a buffer
+                F = fun({{Index, Field, Term}, Value, Props, Tstamp}, Acc) ->
+                            Key = {Index, Field, Term, Value},
+                            case orddict:find(Key, Acc) of
+                                {ok, {_, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
+                                    orddict:store(Key, {Props, Tstamp}, Acc);
+                                error ->
+                                    orddict:store(Key, {Props, Tstamp}, Acc);
+                                _ ->
+                                    Acc
+                            end
+                    end,
+                L1 = [{Index, Field, Term, Value, Props, Tstamp} ||
+                         {{Index, Field, Term, Value}, {Props, Tstamp}}
+                             <- lists:foldl(F, [], Entries)],
+
                 Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
-
-                %% Build a list of what was actually stored in the buffer -- this is what
-                %% we expect to be present in the segment
-                BufferEntries = fold_iterator(mi_buffer:iterator(Buffer),
-                                              fun(Item, Acc0) -> [Item | Acc0] end, []),
-
-                %% Merge the buffer into a segment
-                from_buffer(Buffer, open_write(Root ++ "_segment")),
-                Segment = open_read(Root ++ "_segment"),
+                mi_segment:from_buffer(Buffer, open_write(Root ++ "_segment")),
+                Segment = mi_segment:open_read(Root ++ "_segment"),
 
                 %% Fold over the entire segment
-                SegEntries = fold_iterator(iterator(Segment), fun(Item, Acc0) -> [Item | Acc0] end, []),
+                SL = fold_iterator(iterator(Segment),
+                                   fun(Item, Acc0) -> [Item | Acc0] end, []),
+
+                Three = lists:sublist(Entries, 3),
+                C1 = lists:map(get_count(L1), Three),
+                C2 = lists:map(use_info(Segment), Three),
 
                 mi_buffer:delete(Buffer),
                 mi_segment:delete(Segment),
-                equals(BufferEntries, SegEntries)
+                conjunction([{entires, equals(L1, SL)},
+                             {info, equals(true, C2 >= C1)}])
             end).
 
 
