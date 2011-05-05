@@ -531,11 +531,52 @@ check_range(Root, Entries, Range) ->
     mi_segment:delete(Segment),
     equals(lists:sort(L1), lists:sort(L2)).
 
+prop_iter_test(Root) ->
+    ?LET(IFT, {g_i(), g_f(), g_t()},
+         ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
+              ?FORALL(Entries,
+                      list({oneof(IFTs), g_value(), g_props(), g_tstamp()}),
+                      begin check_iter(Root, Entries, IFT) end))).
+
+check_iter(Root, Entries, IFT) ->
+    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+
+    {I, F, T} = IFT,
+
+    Fun = fun({{Index, Field, Term}, Value, Props, Tstamp}, Acc) ->
+                  Key = {Index, Field, Term, Value},
+                  case orddict:find(Key, Acc) of
+                      {ok, {_, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
+                          orddict:store(Key, {Props, Tstamp}, Acc);
+                      error ->
+                          orddict:store(Key, {Props, Tstamp}, Acc);
+                      _ ->
+                          Acc
+                  end
+          end,
+    L1 = [{Value, Props, Tstamp} ||
+             {{Index, Field, Term, Value}, {Props, Tstamp}}
+                 <- lists:foldl(Fun, [], Entries),
+             Index =:= I, Field =:= F, Term =:= T],
+    Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+    mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
+    Segment = mi_segment:open_read(Root ++ "_segment"),
+
+    Itr = mi_segment:iterator(I, F, T, Segment),
+    L2 = fold_iterator(Itr, fun(X, Acc) -> [X|Acc] end, []),
+
+    mi_segment:delete(Segment),
+    mi_buffer:delete(Buffer),
+    equals(L1, L2).
+
 prop_basic_test_() ->
     test_spec("/tmp/test/mi_segment_basic", fun prop_basic_test/1).
 
 prop_iter_range_test_() ->
     test_spec("/tmp/test/mi_segment_iter_range", fun prop_iter_range_test/1).
+
+prop_iter_test_() ->
+    test_spec("/tmp/test/mi_segment_iter", fun prop_iter_test/1).
 
 test_spec(Root, PropertyFn) ->
     {timeout, 60, fun() ->
