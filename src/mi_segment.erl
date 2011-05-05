@@ -322,7 +322,7 @@ possibly_add_iterator([], IteratorsAcc) ->
 possibly_add_iterator(Results, IteratorsAcc) ->
     Results1 = lists:flatten(lists:reverse(Results)),
     Iterator = fun() -> iterate_list(Results1) end,
-    [Iterator, IteratorsAcc].
+    [Iterator|IteratorsAcc].
     
 %% Turn a list into an iterator.
 iterate_list([]) ->
