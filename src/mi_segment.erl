@@ -411,6 +411,8 @@ expand_key(_, {Index, Field, Term}) ->
 
 -define(POW_2(N), trunc(math:pow(2, N))).
 
+-define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
+
 g_i() ->
     non_empty(binary()).
 
@@ -419,6 +421,13 @@ g_f() ->
 
 g_t() ->
     non_empty(binary()).
+
+g_ift() ->
+    {g_i(), g_f(), g_t()}.
+
+g_ift_range(IFTs) ->
+    ?SUCHTHAT({{I1, F1, _T1}=Start, {I2, F2, _T2}=End},
+              {oneof(IFTs), oneof(IFTs)}, (End >= Start) andalso (I1 =:= I2) andalso (F1 =:= F2)).
 
 g_value() ->
     non_empty(binary()).
@@ -450,6 +459,13 @@ fold_iterator_inner(eof, _Fn, Acc) ->
 fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
     Acc = Fn(Term, Acc0),
     fold_iterator_inner(NextItr(), Fn, Acc).
+
+fold_iterators([], _Fun, Acc) ->
+    lists:reverse(Acc);
+fold_iterators([Itr|Itrs], Fun, Acc0) ->
+    ?debugFmt("Itr: ~p~n", [Itr]),
+    Acc = fold_iterator(Itr, Fun, Acc0),
+    fold_iterators(Itrs, Fun, Acc).
 
 prop_basic_test(Root) ->
     ?FORALL(Entries, list({{g_i(), g_f(), g_t()}, g_value(), g_props(), g_tstamp()}),
@@ -489,16 +505,45 @@ prop_basic_test(Root) ->
                              {info, equals(true, C2 >= C1)}])
             end).
 
+prop_iter_range_test(Root) ->
+    ?LET({I, F}, {g_i(), g_f()},
+         ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
+              ?FORALL({Entries, Range},
+                      {list({oneof(IFTs), g_value(), g_props(), g_tstamp()}), g_ift_range(IFTs)},
+                      begin check_range(Root, Entries, Range) end))).
+
+check_range(Root, Entries, Range) ->
+    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+    Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+    mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
+    Segment = mi_segment:open_read(Root ++ "_segment"),
+
+    {Start, End} = Range,
+    {Index, Field, StartTerm} = Start,
+    {Index, Field, EndTerm} = End,
+    Itrs = mi_segment:iterators(Index, Field, StartTerm, EndTerm, all, Segment),
+    L1 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
+
+    L2 = [{V, K, P}
+          || {Ii, Ff, Tt, V, K, P} <- fold_iterator(mi_segment:iterator(Segment),
+                                                    fun(I,A) -> [I|A] end, []),
+             {Ii, Ff, Tt} >= Start, {Ii, Ff, Tt} =< End],
+    mi_buffer:delete(Buffer),
+    mi_segment:delete(Segment),
+    equals(lists:sort(L1), lists:sort(L2)).
 
 prop_basic_test_() ->
-    {timeout, 60,
-     fun() ->
-             os:cmd("rm -rf /tmp/test_mi; mkdir -p /tmp/test_mi"),
-             ?assert(
-                eqc:quickcheck(
-                  eqc:numtests(250,
-                               ?QC_OUT(prop_basic_test("/tmp/test_mi/t1")))))
-     end}.
+    test_spec("/tmp/test/mi_segment_basic", fun prop_basic_test/1).
+
+prop_iter_range_test_() ->
+    test_spec("/tmp/test/mi_segment_iter_range", fun prop_iter_range_test/1).
+
+test_spec(Root, PropertyFn) ->
+    {timeout, 60, fun() ->
+                          application:load(merge_index),
+                          os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
+                          ?assert(eqc:quickcheck(eqc:numtests(250, ?QC_OUT(PropertyFn(Root ++ "/t1")))))
+                  end}.
 
 -endif. % EQC
 -endif.
