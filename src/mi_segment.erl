@@ -463,7 +463,6 @@ fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
 fold_iterators([], _Fun, Acc) ->
     lists:reverse(Acc);
 fold_iterators([Itr|Itrs], Fun, Acc0) ->
-    ?debugFmt("Itr: ~p~n", [Itr]),
     Acc = fold_iterator(Itr, Fun, Acc0),
     fold_iterators(Itrs, Fun, Acc).
 
