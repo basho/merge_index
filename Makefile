@@ -18,4 +18,5 @@ eunit:
 	./rebar skip_deps=true eunit
 
 dialyzer: compile
-	@dialyzer -Wno_return --src src
+	./rebar dialyze
+
