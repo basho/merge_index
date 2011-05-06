@@ -44,14 +44,17 @@ fold_iterators([Itr|Itrs], Fun, Acc0) ->
     fold_iterators(Itrs, Fun, Acc).
 
 test_spec(Root, PropertyFn) ->
-    test_spec(Root, PropertyFn, 250).
+    test_spec(Root, PropertyFn, 7000).
 
-test_spec(Root, PropertyFn, Runs) ->
-    {timeout, 60,
+test_spec(Root, F, Runs) ->
+    {timeout, 600,
      fun() ->
              application:load(merge_index),
              os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
-             ?assert(
-                eqc:quickcheck(
-                  eqc:numtests(Runs, ?QC_OUT(PropertyFn(Root ++ "/t1")))))
+             R = eqc:quickcheck(
+                   eqc:numtests(Runs, ?QC_OUT(F(Root ++ "/t1")))),
+             %% I know this looks weird but it's so that you know
+             %% which `F` failed.
+             {name, Name} = erlang:fun_info(F, name),
+             ?assertEqual({Name, true}, {Name, R})
      end}.
