@@ -18,10 +18,12 @@ use_info(Segment) ->
     end.
 
 prop_basic_test(Root) ->
-    ?FORALL(Entries, list({{g_i(), g_f(), g_t()}, g_value(), g_props(), g_tstamp()}),
+    ?FORALL({Entries, Size},
+            {list({g_ift(), g_value(), g_props(), g_tstamp()}),
+             choose(64,1024)},
             begin
                 [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
-
+                application:set_env(merge_index, segment_full_read_size, Size),
                 F = fun({{Index, Field, Term}, Value, Props, Tstamp}, Acc) ->
                             Key = {Index, Field, Term, Value},
                             case orddict:find(Key, Acc) of
