@@ -121,7 +121,7 @@ worker_loop(Parent) ->
                         false ->
                             ok
                     end;
-                
+
                 {Error, Reason} when Error == error; Error == 'EXIT' ->
                     error_logger:error_msg("Failed to compact ~p: ~p\n",
                                            [Pid, Reason])

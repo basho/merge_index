@@ -236,10 +236,6 @@ handle_call(start_compaction, From, State) ->
     end, [link, {fullsweep_after, 0}]),
     {noreply, State#state { is_compacting={From, CompactingPid} }};
 
-%% Instead of count, return an actual weight. The weight will either
-%% be 0 (if the term is in a block with other terms) or the size of
-%% the block if the block is devoted to the index alone. This will
-%% make query planning go as expected.
 handle_call({info, Index, Field, Term}, _From, State) ->
     %% Calculate the IFT...
     #state { buffers=Buffers, segments=Segments } = State,

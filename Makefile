@@ -20,3 +20,6 @@ eunit:
 dialyzer: compile
 	./rebar dialyze
 
+docs:
+	./rebar skip_deps=true doc
+
