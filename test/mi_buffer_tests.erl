@@ -5,14 +5,14 @@
 -include("common.hrl").
 
 prop_basic_test(Root) ->
-    ?FORALL(Entries, list({g_ift(), g_value(), g_props(), g_tstamp()}),
+    ?FORALL(Entries, list({g_ift(), g_value(), g_tstamp(), g_props()}),
             begin
                 check_entries(Root, Entries)
             end).
 
 prop_dups_test(Root) ->
     ?FORALL(Entries, list(default({{<<0>>,<<0>>,<<0>>},<<0>>,[],0},
-                                  {g_ift(), g_value(), g_props(), g_tstamp()})),
+                                  {g_ift(), g_value(), g_tstamp(), g_props()})),
             begin
                 check_entries(Root, Entries)
             end).
@@ -21,8 +21,8 @@ check_entries(Root, Entries) ->
     [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
 
-    L1 = [{I, F, T, Value, Props, Tstamp}
-          || {{I, F, T}, Value, Props, Tstamp} <- Entries],
+    L1 = [{I, F, T, Value, Tstamp, Props}
+          || {{I, F, T}, Value, Tstamp, Props} <- Entries],
 
     L2 = fold_iterator(mi_buffer:iterator(Buffer),
                        fun(Item, Acc0) -> [Item | Acc0] end, []),
@@ -33,7 +33,7 @@ prop_iter_range_test(Root) ->
     ?LET({I, F}, {g_i(), g_f()},
          ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
               ?FORALL({Entries, Range},
-                      {list({oneof(IFTs), g_value(), g_props(), g_tstamp()}), g_ift_range(IFTs)},
+                      {list({oneof(IFTs), g_value(), g_tstamp(), g_props()}), g_ift_range(IFTs)},
                       begin check_range(Root, Entries, Range) end))).
 
 check_range(Root, Entries, Range) ->

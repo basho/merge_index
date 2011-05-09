@@ -2,6 +2,7 @@
 -define(QC_OUT(P),
         eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 -define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
+-export([unique_latest/2]).
 
 g_i() ->
     non_empty(binary()).
@@ -25,8 +26,9 @@ g_value() ->
 g_props() ->
     list({oneof([word_pos, offset]), choose(0, ?POW_2(31))}).
 
+%% Generate inverted tstamps to match mi_server
 g_tstamp() ->
-    choose(0, ?POW_2(31)).
+    choose(-?POW_2(31), 0).
 
 fold_iterator(Itr, Fn, Acc0) ->
     fold_iterator_inner(Itr(), Fn, Acc0).
@@ -43,6 +45,18 @@ fold_iterators([Itr|Itrs], Fun, Acc0) ->
     Acc = fold_iterator(Itr, Fun, Acc0),
     fold_iterators(Itrs, Fun, Acc).
 
+%% Remember, tstamps are inverted by mi_server.
+unique_latest({{Index, Field, Term}, Value, Tstamp, Props}, Acc) ->
+    Key = {Index, Field, Term, Value},
+    case orddict:find(Key, Acc) of
+        {ok, {ExistingTstamp, _}} when Tstamp < ExistingTstamp ->
+            orddict:store(Key, {Tstamp, Props}, Acc);
+        error ->
+            orddict:store(Key, {Tstamp, Props}, Acc);
+        _ ->
+            Acc
+    end.
+
 test_spec(Root, PropertyFn) ->
     test_spec(Root, PropertyFn, 7000).
 
@@ -58,3 +72,4 @@ test_spec(Root, F, Runs) ->
              {name, Name} = erlang:fun_info(F, name),
              ?assertEqual({Name, true}, {Name, R})
      end}.
+

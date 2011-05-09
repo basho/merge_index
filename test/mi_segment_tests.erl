@@ -19,25 +19,14 @@ use_info(Segment) ->
 
 prop_basic_test(Root) ->
     ?FORALL({Entries, Size},
-            {list({g_ift(), g_value(), g_props(), g_tstamp()}),
+            {list({g_ift(), g_value(), g_tstamp(), g_props()}),
              choose(64,1024)},
             begin
                 [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
                 application:set_env(merge_index, segment_full_read_size, Size),
-                F = fun({{Index, Field, Term}, Value, Props, Tstamp}, Acc) ->
-                            Key = {Index, Field, Term, Value},
-                            case orddict:find(Key, Acc) of
-                                {ok, {_, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
-                                    orddict:store(Key, {Props, Tstamp}, Acc);
-                                error ->
-                                    orddict:store(Key, {Props, Tstamp}, Acc);
-                                _ ->
-                                    Acc
-                            end
-                    end,
-                L1 = [{Index, Field, Term, Value, Props, Tstamp} ||
-                         {{Index, Field, Term, Value}, {Props, Tstamp}}
-                             <- lists:foldl(F, [], Entries)],
+                L1 = [{Index, Field, Term, Value, Tstamp, Props} ||
+                         {{Index, Field, Term, Value}, {Tstamp, Props}}
+                             <- lists:foldl(fun unique_latest/2, [], lists:sort(Entries))],
 
                 Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
                 mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
@@ -61,7 +50,7 @@ prop_iter_range_test(Root) ->
     ?LET({I, F}, {g_i(), g_f()},
          ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
               ?FORALL({Entries, Range},
-                      {list({oneof(IFTs), g_value(), g_props(), g_tstamp()}), g_ift_range(IFTs)},
+                      {list({oneof(IFTs), g_value(), g_tstamp(), g_props()}), g_ift_range(IFTs)},
                       begin check_range(Root, Entries, Range) end))).
 
 check_range(Root, Entries, Range) ->
@@ -88,7 +77,7 @@ prop_iter_test(Root) ->
     ?LET(IFT, {g_i(), g_f(), g_t()},
          ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
               ?FORALL(Entries,
-                      list({oneof(IFTs), g_value(), g_props(), g_tstamp()}),
+                      list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
                       begin check_iter(Root, Entries, IFT) end))).
 
 check_iter(Root, Entries, IFT) ->
@@ -96,20 +85,9 @@ check_iter(Root, Entries, IFT) ->
 
     {I, F, T} = IFT,
 
-    Fun = fun({{Index, Field, Term}, Value, Props, Tstamp}, Acc) ->
-                  Key = {Index, Field, Term, Value},
-                  case orddict:find(Key, Acc) of
-                      {ok, {_, ExistingTstamp}} when Tstamp >= ExistingTstamp ->
-                          orddict:store(Key, {Props, Tstamp}, Acc);
-                      error ->
-                          orddict:store(Key, {Props, Tstamp}, Acc);
-                      _ ->
-                          Acc
-                  end
-          end,
     L1 = [{Value, Props, Tstamp} ||
              {{Index, Field, Term, Value}, {Props, Tstamp}}
-                 <- lists:foldl(Fun, [], Entries),
+                 <- lists:foldl(fun unique_latest/2, [], lists:sort(Entries)),
              Index =:= I, Field =:= F, Term =:= T],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
     mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
