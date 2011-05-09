@@ -43,21 +43,44 @@ check_range(Root, Entries, Range) ->
     {Start, End} = Range,
     {Index, Field, StartTerm} = Start,
     {Index, Field, EndTerm} = End,
-    Itrs = mi_buffer:iterators(Index, Field, StartTerm, EndTerm, all, Buffer),
-    L1 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
 
-    L2 = [{V, K, P}
-          || {Ii, Ff, Tt, V, K, P} <- fold_iterator(mi_buffer:iterator(Buffer),
-                                                    fun(I,A) -> [I|A] end, []),
-             {Ii, Ff, Tt} >= Start, {Ii, Ff, Tt} =< End],
+    L1 = [{V, K, P} || {{_, _, _}=IFT, V, K, P} <- Entries,
+                       IFT >= Start, IFT =< End],
+
+    Itrs = mi_buffer:iterators(Index, Field, StartTerm, EndTerm, all, Buffer),
+    L2 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
+
     mi_buffer:delete(Buffer),
     equals(lists:sort(L1), lists:sort(L2)).
+
+prop_info_test(Root) ->
+    ?LET(IFT, g_ift(),
+         ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
+              ?FORALL(Entries,
+                      list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
+                      begin check_count(Root, Entries, IFT) end))).
+
+check_count(Root, Entries, IFT) ->
+    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
+    Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+
+    {Ie, Fe, Te} = IFT,
+    L1 = [X || {{I, F, T}, _, _, _} = X <- Entries,
+               (I =:= Ie) andalso (F =:= Fe) andalso (T =:= Te)],
+
+    C1 = length(L1),
+    C2 = mi_buffer:info(Ie, Fe, Te, Buffer),
+    mi_buffer:delete(Buffer),
+    equals(C1, C2).
 
 prop_basic_test_() ->
     test_spec("/tmp/test/mi_buffer_basic", fun prop_basic_test/1).
 
 prop_dups_test_() ->
-    test_spec("/tmp/test/mi_buffer_basic", fun prop_dups_test/1).
+    test_spec("/tmp/test/mi_buffer_dups", fun prop_dups_test/1).
 
 prop_iter_range_test_() ->
     test_spec("/tmp/test/mi_buffer_iter", fun prop_iter_range_test/1).
+
+prop_info_test_() ->
+    test_spec("/tmp/test/mi_buffer_info", fun prop_info_test/1).
