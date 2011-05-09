@@ -58,10 +58,10 @@ unique_latest({{Index, Field, Term}, Value, Tstamp, Props}, Acc) ->
     end.
 
 test_spec(Root, PropertyFn) ->
-    test_spec(Root, PropertyFn, 7000).
+    test_spec(Root, PropertyFn, 250).
 
 test_spec(Root, F, Runs) ->
-    {timeout, 600,
+    {timeout, 30,
      fun() ->
              application:load(merge_index),
              os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
