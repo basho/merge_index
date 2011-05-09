@@ -79,8 +79,8 @@ size(Buffer) ->
 
 %% Write the value to the buffer.
 %% Returns the new buffer structure.
-write(Index, Field, Term, Value, Props, TS, Buffer) ->
-    write([{Index, Field, Term, Value, Props, TS}], Buffer).
+write(Index, Field, Term, Value, TS, Props, Buffer) ->
+    write([{Index, Field, Term, Value, TS, Props}], Buffer).
 
 write(Postings, Buffer) ->
     %% Write to file...
