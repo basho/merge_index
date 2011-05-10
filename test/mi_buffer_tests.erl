@@ -1,4 +1,7 @@
 -module(mi_buffer_tests).
+-import(common, [g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1, g_value/0,
+                 g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
+                 unique_latest/2, test_spec/2]).
 
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eunit/include/eunit.hrl").

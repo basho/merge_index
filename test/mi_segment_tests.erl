@@ -1,4 +1,7 @@
 -module(mi_segment_tests).
+-import(common, [g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1, g_value/0,
+                 g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
+                 test_spec/2]).
 
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -35,7 +38,8 @@ prop_basic_test(Root) ->
 
                 L1 = [{Index, Field, Term, Value, Tstamp, Props} ||
                          {{Index, Field, Term, Value}, {Tstamp, Props}}
-                             <- lists:foldl(fun unique_latest/2, [], lists:sort(Entries))],
+                             <- lists:foldl(fun common:unique_latest/2,
+                                            [], lists:sort(Entries))],
 
                 Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
                 mi_segment:from_buffer(Buffer, mi_segment:open_write(SegName)),
@@ -99,7 +103,8 @@ check_iter(Root, Entries, IFT) ->
 
     L1 = [{Value, Props, Tstamp} ||
              {{Index, Field, Term, Value}, {Props, Tstamp}}
-                 <- lists:foldl(fun unique_latest/2, [], lists:sort(Entries)),
+                 <- lists:foldl(fun common:unique_latest/2,
+                                [], lists:sort(Entries)),
              Index =:= I, Field =:= F, Term =:= T],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
     mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
