@@ -15,7 +15,7 @@
     delete/1,
     filesize/1,
     size/1,
-    write/7, write/2,
+    write/2,
     info/4,
     iterator/1, iterator/4, iterators/6
 ]).
@@ -76,11 +76,6 @@ filesize(Buffer) ->
 
 size(Buffer) ->
     ets:info(Buffer#buffer.table, size).
-
-%% Write the value to the buffer.
-%% Returns the new buffer structure.
-write(Index, Field, Term, Value, TS, Props, Buffer) ->
-    write([{Index, Field, Term, Value, TS, Props}], Buffer).
 
 write(Postings, Buffer) ->
     %% Write to file...
