@@ -61,10 +61,11 @@ prop_basic_test(Root) ->
 
 prop_iter_range_test(Root) ->
     ?LET({I, F}, {g_i(), g_f()},
-         ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
-              ?FORALL({Entries, Range},
-                      {list({oneof(IFTs), g_value(), g_tstamp(), g_props()}), g_ift_range(IFTs)},
-                      begin check_range(Root, Entries, Range) end))).
+    ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
+    ?FORALL({Entries, Range},
+            {list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
+             g_ift_range(IFTs)},
+            check_range(Root, Entries, Range)))).
 
 check_range(Root, Entries, Range) ->
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
@@ -88,10 +89,10 @@ check_range(Root, Entries, Range) ->
 
 prop_iter_test(Root) ->
     ?LET(IFT, {g_i(), g_f(), g_t()},
-         ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
-              ?FORALL(Entries,
-                      list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
-                      begin check_iter(Root, Entries, IFT) end))).
+    ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
+    ?FORALL(Entries,
+            list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
+            check_iter(Root, Entries, IFT)))).
 
 check_iter(Root, Entries, IFT) ->
     {I, F, T} = IFT,

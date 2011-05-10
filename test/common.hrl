@@ -18,7 +18,8 @@ g_ift() ->
 
 g_ift_range(IFTs) ->
     ?SUCHTHAT({{I1, F1, _T1}=Start, {I2, F2, _T2}=End},
-              {oneof(IFTs), oneof(IFTs)}, (End >= Start) andalso (I1 =:= I2) andalso (F1 =:= F2)).
+              {oneof(IFTs), oneof(IFTs)},
+              (End >= Start) andalso (I1 =:= I2) andalso (F1 =:= F2)).
 
 g_value() ->
     non_empty(binary()).
