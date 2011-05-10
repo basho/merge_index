@@ -6,16 +6,12 @@
 
 prop_basic_test(Root) ->
     ?FORALL(Entries, list({g_ift(), g_value(), g_tstamp(), g_props()}),
-            begin
-                check_entries(Root, Entries)
-            end).
+            check_entries(Root, Entries)).
 
 prop_dups_test(Root) ->
     ?FORALL(Entries, list(default({{<<0>>,<<0>>,<<0>>},<<0>>,[],0},
                                   {g_ift(), g_value(), g_tstamp(), g_props()})),
-            begin
-                check_entries(Root, Entries)
-            end).
+            check_entries(Root, Entries)).
 
 check_entries(Root, Entries) ->
     BufName = Root ++ "_buffer",
@@ -36,11 +32,14 @@ check_entries(Root, Entries) ->
                  {filename, equals(BufName, Name)}]).
 
 prop_iter_range_test(Root) ->
-    ?LET({I, F}, {g_i(), g_f()},
-         ?LET(IFTs, non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
-              ?FORALL({Entries, Range},
-                      {list({oneof(IFTs), g_value(), g_tstamp(), g_props()}), g_ift_range(IFTs)},
-                      begin check_range(Root, Entries, Range) end))).
+    ?LET({I, F},
+         {g_i(), g_f()},
+    ?LET(IFTs,
+         non_empty(list(frequency([{10, {I, F, g_t()}}, {1, g_ift()}]))),
+    ?FORALL({Entries, Range},
+            {list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
+             g_ift_range(IFTs)},
+            check_range(Root, Entries, Range)))).
 
 check_range(Root, Entries, Range) ->
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
@@ -60,10 +59,10 @@ check_range(Root, Entries, Range) ->
 
 prop_info_test(Root) ->
     ?LET(IFT, g_ift(),
-         ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
-              ?FORALL(Entries,
-                      list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
-                      begin check_count(Root, Entries, IFT) end))).
+    ?LET(IFTs, non_empty(list(frequency([{10, IFT}, {1, g_ift()}]))),
+    ?FORALL(Entries,
+            list({oneof(IFTs), g_value(), g_tstamp(), g_props()}),
+            check_count(Root, Entries, IFT)))).
 
 check_count(Root, Entries, IFT) ->
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
