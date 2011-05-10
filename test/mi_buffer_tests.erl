@@ -19,15 +19,22 @@ prop_dups_test(Root) ->
 
 check_entries(Root, Entries) ->
     [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
-    Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+    BufName = Root ++ "_buffer",
+    Buffer = mi_buffer:write(Entries, mi_buffer:new(BufName)),
 
     L1 = [{I, F, T, Value, Tstamp, Props}
           || {{I, F, T}, Value, Tstamp, Props} <- Entries],
+    ES = length(L1),
 
     L2 = fold_iterator(mi_buffer:iterator(Buffer),
                        fun(Item, Acc0) -> [Item | Acc0] end, []),
+    AS = mi_buffer:size(Buffer),
+    Name = mi_buffer:filename(Buffer),
+
     mi_buffer:delete(Buffer),
-    equals(lists:sort(L1), lists:sort(L2)).
+    conjunction([{postings, equals(lists:sort(L1), lists:sort(L2))},
+                 {size, equals(ES, AS)},
+                 {filename, equals(BufName, Name)}]).
 
 prop_iter_range_test(Root) ->
     ?LET({I, F}, {g_i(), g_f()},

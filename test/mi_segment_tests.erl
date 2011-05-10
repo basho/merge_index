@@ -18,19 +18,29 @@ use_info(Segment) ->
     end.
 
 prop_basic_test(Root) ->
-    ?FORALL({Entries, Size},
+    ?FORALL({Entries, Size, VCT, VSS, BS, FBS},
             {list({g_ift(), g_value(), g_tstamp(), g_props()}),
-             choose(64,1024)},
+             choose(64,1024),
+             choose(0,24),
+             choose(1,24),
+             choose(64, 4096),
+             choose(64, 4096)},
             begin
                 [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
                 application:set_env(merge_index, segment_full_read_size, Size),
+                application:set_env(merge_index, segment_values_compression_threshold, VCT),
+                application:set_env(merge_index, segment_values_staging_size, VSS),
+                application:set_env(merge_index, segment_block_size, BS),
+                application:set_env(merge_index, segment_file_buffer_size, FBS),
+                SegName = Root ++ "_segment",
+
                 L1 = [{Index, Field, Term, Value, Tstamp, Props} ||
                          {{Index, Field, Term, Value}, {Tstamp, Props}}
                              <- lists:foldl(fun unique_latest/2, [], lists:sort(Entries))],
 
                 Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
-                mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
-                Segment = mi_segment:open_read(Root ++ "_segment"),
+                mi_segment:from_buffer(Buffer, mi_segment:open_write(SegName)),
+                Segment = mi_segment:open_read(SegName),
 
                 %% Fold over the entire segment
                 SL = fold_iterator(mi_segment:iterator(Segment),
@@ -42,7 +52,11 @@ prop_basic_test(Root) ->
 
                 mi_buffer:delete(Buffer),
                 mi_segment:delete(Segment),
-                conjunction([{entires, equals(L1, SL)},
+                Exists = mi_segment:exists(Segment),
+                Name = mi_segment:filename(Segment),
+                conjunction([{filename, equals(Name, SegName)},
+                             {exists, equals(false, Exists)},
+                             {entires, equals(L1, SL)},
                              {info, equals(true, C2 >= C1)}])
             end).
 
@@ -56,7 +70,8 @@ prop_iter_range_test(Root) ->
 check_range(Root, Entries, Range) ->
     [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
-    mi_segment:from_buffer(Buffer, mi_segment:open_write(Root ++ "_segment")),
+    mi_segment:from_iterator(mi_buffer:iterator(Buffer),
+                             mi_segment:open_write(Root ++ "_segment")),
     Segment = mi_segment:open_read(Root ++ "_segment"),
 
     {Start, End} = Range,
