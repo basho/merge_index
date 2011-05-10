@@ -26,7 +26,6 @@ prop_basic_test(Root) ->
              choose(64, 4096),
              choose(64, 4096)},
             begin
-                [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
                 application:set_env(merge_index, segment_full_read_size, Size),
                 application:set_env(merge_index, segment_values_compression_threshold, VCT),
                 application:set_env(merge_index, segment_values_staging_size, VSS),
@@ -68,7 +67,6 @@ prop_iter_range_test(Root) ->
                       begin check_range(Root, Entries, Range) end))).
 
 check_range(Root, Entries, Range) ->
-    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
     mi_segment:from_iterator(mi_buffer:iterator(Buffer),
                              mi_segment:open_write(Root ++ "_segment")),
@@ -96,8 +94,6 @@ prop_iter_test(Root) ->
                       begin check_iter(Root, Entries, IFT) end))).
 
 check_iter(Root, Entries, IFT) ->
-    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
-
     {I, F, T} = IFT,
 
     L1 = [{Value, Props, Tstamp} ||

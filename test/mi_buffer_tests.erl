@@ -18,7 +18,6 @@ prop_dups_test(Root) ->
             end).
 
 check_entries(Root, Entries) ->
-    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
     BufName = Root ++ "_buffer",
     Buffer = mi_buffer:write(Entries, mi_buffer:new(BufName)),
 
@@ -44,7 +43,6 @@ prop_iter_range_test(Root) ->
                       begin check_range(Root, Entries, Range) end))).
 
 check_range(Root, Entries, Range) ->
-    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
 
     {Start, End} = Range,
@@ -68,7 +66,6 @@ prop_info_test(Root) ->
                       begin check_count(Root, Entries, IFT) end))).
 
 check_count(Root, Entries, IFT) ->
-    [file:delete(X) || X <- filelib:wildcard(filename:dirname(Root) ++ "/*")],
     Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
 
     {Ie, Fe, Te} = IFT,
