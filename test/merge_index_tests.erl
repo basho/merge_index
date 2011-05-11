@@ -54,7 +54,8 @@ command(S) ->
     P = S#state.server_pid,
     oneof([{call,?MODULE,index, [P,g_postings()]},
            {call,?MODULE,is_empty, [P]},
-           {call,?MODULE,info, [P, g_i(), g_f(), g_t()]}]).
+           {call,?MODULE,info, [P, g_i(), g_f(), g_t()]},
+           {call,?MODULE,fold, [P, fun fold_fun/7, []]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
     S#state{server_pid=Pid};
@@ -76,12 +77,14 @@ postcondition(S, {call,_,is_empty,_}, V) ->
         _ -> V =:= false
     end;
 postcondition(_, {call,_,index,_}, V) ->
-    ok == ?assertEqual(V, ok);
+    ok == ?assertEqual(ok, V);
 postcondition(#state{postings=Postings}, {call,_,info,[_,I,F,T]}, V) ->
     L = [x || {Ii, Ff, Tt} <- Postings,
               (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     {ok, [{T, W}]} = V,
-    ok == ?assertEqual(W, length(L));
+    ok == ?assertEqual(length(L), W);
+postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
+    ok == ?assertEqual(lists:reverse(lists:sort(Postings)), V);
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
@@ -97,6 +100,7 @@ g_postings() ->
 %% ====================================================================
 %% wrappers
 %% ====================================================================
+
 init() ->
     Root = "/tmp/test/prop_api",
     os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
@@ -112,3 +116,13 @@ info(Pid, I, F, T) ->
 
 is_empty(Pid) ->
     merge_index:is_empty(Pid).
+
+fold(Pid, Fun, Acc) ->
+    merge_index:fold(Pid, Fun, Acc).
+
+%% ====================================================================
+%% helpers
+%% ====================================================================
+
+fold_fun(I, F, T, V, P, TS, Acc) ->
+    [{I, F, T, V, P, TS}|Acc].
