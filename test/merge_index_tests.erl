@@ -13,7 +13,7 @@
 prop_api_test_() ->
     {timeout, 60,
      fun() ->
-            ?assert(eqc:quickcheck(?QC_OUT(prop_api())))
+            ?assert(eqc:quickcheck(eqc:numtests(200,?QC_OUT(prop_api()))))
      end
     }.
 
@@ -22,16 +22,23 @@ prop_api() ->
 
     ?FORALL(Cmds, commands(?MODULE),
             begin
-                {_H, _S, Res} = run_commands(?MODULE, Cmds),
+                {H, S, Res} = run_commands(?MODULE, Cmds),
 
                 case Res of
-                    ok -> true;
+                    ok -> ok;
                     _ -> io:format(user,
                                    "QC History: ~p~n"
                                    "QC State: ~p~n"
                                    "QC result: ~p~n",
-                                   [_H, _S, Res])
-                end
+                                   [H, S, Res])
+                end,
+
+                Pid = S#state.server_pid,
+                if Pid /= undefined -> merge_index:stop(Pid);
+                   true -> ok
+                end,
+
+                aggregate(command_names(Cmds), Res == ok)
             end).
 
 %% ====================================================================
@@ -46,7 +53,8 @@ command(#state{server_pid=undefined}) ->
 command(S) ->
     P = S#state.server_pid,
     oneof([{call,?MODULE,index, [P,g_postings()]},
-           {call,?MODULE,is_empty, [P]}]).
+           {call,?MODULE,is_empty, [P]},
+           {call,?MODULE,info, [P, g_i(), g_f(), g_t()]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
     S#state{server_pid=Pid};
@@ -57,16 +65,23 @@ next_state(S, _Res, {call,_,index,[_,Postings]}) ->
             Postings0 = S#state.postings,
             S#state{postings=Postings0++Postings}
     end;
-next_state(S, _Res, {call,_,is_empty,_}) -> S.
+next_state(S, _Res, {call,_,_,_}) -> S.
 
 precondition(_,_) ->
     true.
 
-postcondition(S, {call,_,is_empty,[P]}, V) ->
+postcondition(S, {call,_,is_empty,_}, V) ->
     case S#state.postings of
         [] -> V =:= true;
         _ -> V =:= false
     end;
+postcondition(_, {call,_,index,_}, V) ->
+    ok == ?assertEqual(V, ok);
+postcondition(#state{postings=Postings}, {call,_,info,[_,I,F,T]}, V) ->
+    L = [x || {Ii, Ff, Tt} <- Postings,
+              (I == Ii) andalso (F == Ff) andalso (T == Tt)],
+    {ok, [{T, W}]} = V,
+    ok == ?assertEqual(W, length(L));
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
@@ -91,6 +106,9 @@ init() ->
 
 index(Pid, Postings) ->
     merge_index:index(Pid, Postings).
+
+info(Pid, I, F, T) ->
+    merge_index:info(Pid, I, F, T).
 
 is_empty(Pid) ->
     merge_index:is_empty(Pid).
