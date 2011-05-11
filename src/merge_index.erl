@@ -104,8 +104,9 @@ is_empty(ServerPid) ->
 
 %% @doc Fold over all IFTs in the index.
 %%
-%% `Fun' - Function to fold over data.  The 1st arg is the posting and
-%% the 2nd arg is the accumulator.
+%% `Fun' - Function to fold over data.  It takes 7 args.  1-6 are `I',
+%% `F', `T', `Value', `Props', `Timestamp' and the 7th is the
+%% accumulator.
 %%
 %% `Acc' - The accumulator to seed the fold with.
 %%
