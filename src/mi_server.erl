@@ -15,6 +15,7 @@
     set_deleteme_flag/1,
     register_buffer_converter/2,
     buffer_to_segment/3,
+    stop/1,
     %% GEN SERVER
     init/1,
     handle_call/3,
@@ -55,6 +56,9 @@ register_buffer_converter(ServerPid, ConverterPid) ->
 
 buffer_to_segment(ServerPid, Buffer, SegmentWO) ->
     gen_server:cast(ServerPid, {buffer_to_segment, Buffer, SegmentWO}).
+
+stop(Pid) ->
+    gen_server:call(Pid, stop).
 
 init([Root]) ->
     %% Seed the random generator...
@@ -393,6 +397,9 @@ handle_call(drop, _From, State) ->
                              buffers = [Buffer],
                              segments = [] },
     {reply, ok, NewState};
+
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 
 handle_call(Request, _From, State) ->
     ?PRINT({unhandled_call, Request}),

@@ -46,9 +46,10 @@
 start_link(Root) ->
     gen_server:start_link(mi_server, [Root], [{timeout, infinity}]).
 
-%% @doc This is a no op...why is it here?
-stop(_ServerPid) ->
-    ok.
+%% @doc Stop the merge_index server.
+-spec stop(pid()) -> ok.
+stop(ServerPid) ->
+    mi_server:stop(ServerPid).
 
 %% @doc Index the IFT with the supplied `Value', `Props' and
 %% `Timestamp'.
