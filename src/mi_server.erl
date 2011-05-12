@@ -339,7 +339,9 @@ handle_call({range, Index, Field, StartTerm, EndTerm, Size, Pid, Ref, FilterFun}
                 | State#state.stream_range_pids ],
     {reply, ok, State#state { locks=NewLocks1,
                               stream_range_pids=NewPids }};
-    
+
+%% NOTE: The order in which fold returns postings is not deterministic
+%% and is determined by things such as buffer_rollover_size.
 handle_call({fold, FoldFun, Acc}, _From, State) ->
     #state { buffers=Buffers, segments=Segments } = State,
 

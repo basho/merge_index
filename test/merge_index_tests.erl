@@ -19,6 +19,10 @@ prop_api_test_() ->
 
 prop_api() ->
     application:load(merge_index),
+    ok = application:start(sasl),
+    %% Comment out following line to be spammed with SASL reports
+    error_logger:delete_report_handler(sasl_report_tty_h),
+    ok = application:start(merge_index),
 
     ?FORALL(Cmds, commands(?MODULE),
             begin
@@ -49,7 +53,7 @@ initial_state() ->
     #state{}.
 
 command(#state{server_pid=undefined}) ->
-    {call,?MODULE,init,[]};
+    {call,?MODULE,init,[g_settings()]};
 command(S) ->
     P = S#state.server_pid,
     Postings = S#state.postings,
@@ -86,16 +90,26 @@ postcondition(#state{postings=Postings}, {call,_,info,[_,I,F,T]}, V) ->
     {ok, [{T, W}]} = V,
     ok == ?assertEqual(length(L), W);
 postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
-    ok == ?assertEqual(lists:reverse(lists:sort(Postings)), V);
-postcondition(#state{postings=Postings}, {call,_,stream,[_,I,F,T]}, V) ->
-    L = [x || {Ii, Ff, Tt} <- Postings,
-              (I == Ii) andalso (F == Ff) andalso (T == Tt)],
+    L = [{I,F,T,V,-1*TS,P} || {I,F,T,V,P,TS} <- Postings],
+    %% NOTE: The order in which fold returns postings is not
+    %% deterministic thus both must be sorted.
+    ok == ?assertEqual(lists:sort(Postings), lists:sort(V));
+postcondition(#state{postings=Postings},
+              {call,_,stream,[_,{I,F,T,_,_,_}]}, V) ->
+    L = [{V,P} || {Ii,Ff,Tt,V,P,_} <- Postings,
+                  (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     ok == ?assertEqual(L, V);
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
 %% generators
 %% ====================================================================
+
+g_size() ->
+    choose(64, 1024).
+
+g_settings() ->
+    [g_size(), g_size()].
 
 g_pos_tstamp() ->
     choose(0, ?POW_2(31)).
@@ -119,9 +133,11 @@ g_posting(Postings) ->
 %% wrappers
 %% ====================================================================
 
-init() ->
+init([BRS,BDWS]) ->
     Root = "/tmp/test/prop_api",
     os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
+    set(buffer_rollover_size, BRS),
+    set(buffer_delayed_write_size, BDWS),
     merge_index:start_link(Root),
     {ok, Pid} = merge_index:start_link(Root),
     Pid.
@@ -149,13 +165,16 @@ stream(Pid, {I,F,T,_,_,_}) ->
 %% helpers
 %% ====================================================================
 
+set(Par, Val) ->
+    application:set_env(merge_index, Par, Val).
+
 fold_fun(I, F, T, V, P, TS, Acc) ->
     [{I, F, T, V, P, TS}|Acc].
 
 data_sink(Ref, Acc, Done) ->
     receive
         {result_vec, Data, Ref} ->
-            data_sink(Ref, [Data|Acc], false);
+            data_sink(Ref, Acc++Data, false);
         {result, '$end_of_table', Ref} ->
             data_sink(Ref, Acc, true);
         {gimmie, From, Ref} ->
