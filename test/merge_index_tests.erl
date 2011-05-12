@@ -52,10 +52,12 @@ command(#state{server_pid=undefined}) ->
     {call,?MODULE,init,[]};
 command(S) ->
     P = S#state.server_pid,
-    oneof([{call,?MODULE,index, [P,g_postings()]},
+    Postings = S#state.postings,
+    oneof([{call,?MODULE,index, [P, g_postings()]},
            {call,?MODULE,is_empty, [P]},
-           {call,?MODULE,info, [P, g_i(), g_f(), g_t()]},
-           {call,?MODULE,fold, [P, fun fold_fun/7, []]}]).
+           {call,?MODULE,info, [P, g_posting(Postings)]},
+           {call,?MODULE,fold, [P, fun fold_fun/7, []]},
+           {call,?MODULE,stream, [P, g_posting(Postings)]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
     S#state{server_pid=Pid};
@@ -85,6 +87,10 @@ postcondition(#state{postings=Postings}, {call,_,info,[_,I,F,T]}, V) ->
     ok == ?assertEqual(length(L), W);
 postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     ok == ?assertEqual(lists:reverse(lists:sort(Postings)), V);
+postcondition(#state{postings=Postings}, {call,_,stream,[_,I,F,T]}, V) ->
+    L = [x || {Ii, Ff, Tt} <- Postings,
+              (I == Ii) andalso (F == Ff) andalso (T == Tt)],
+    ok == ?assertEqual(L, V);
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
@@ -94,8 +100,20 @@ postcondition(_,_,_) -> true.
 g_pos_tstamp() ->
     choose(0, ?POW_2(31)).
 
+g_posting() ->
+    {g_i(), g_f(), g_t(), g_value(), g_props(), g_pos_tstamp()}.
+
 g_postings() ->
-    list({g_i(), g_f(), g_t(), g_value(), g_props(), g_pos_tstamp()}).
+    list(g_posting()).
+
+g_posting(Postings) ->
+    case length(Postings) of
+        0 ->
+            g_posting();
+        _ ->
+            oneof([elements(Postings),
+                   g_posting()])
+    end.
 
 %% ====================================================================
 %% wrappers
@@ -111,7 +129,7 @@ init() ->
 index(Pid, Postings) ->
     merge_index:index(Pid, Postings).
 
-info(Pid, I, F, T) ->
+info(Pid, {I,F,T,_,_,_}) ->
     merge_index:info(Pid, I, F, T).
 
 is_empty(Pid) ->
@@ -120,9 +138,51 @@ is_empty(Pid) ->
 fold(Pid, Fun, Acc) ->
     merge_index:fold(Pid, Fun, Acc).
 
+stream(Pid, {I,F,T,_,_,_}) ->
+    Ref = make_ref(),
+    Sink = spawn(?MODULE, data_sink, [Ref, [], false]),
+    Ft = fun(_,_) -> true end,
+    ok = merge_index:stream(Pid, I, F, T, Sink, Ref, Ft),
+    wait_for_it(Sink, Ref).
+
 %% ====================================================================
 %% helpers
 %% ====================================================================
 
 fold_fun(I, F, T, V, P, TS, Acc) ->
     [{I, F, T, V, P, TS}|Acc].
+
+data_sink(Ref, Acc, Done) ->
+    receive
+        {result_vec, Data, Ref} ->
+            data_sink(Ref, [Data|Acc], false);
+        {result, '$end_of_table', Ref} ->
+            data_sink(Ref, Acc, true);
+        {gimmie, From, Ref} ->
+            From ! {ok, Ref, lists:reverse(Acc)};
+        {'done?', From, Ref} ->
+            From ! {ok, Ref, Done},
+            data_sink(Ref, Acc, Done);
+        Other ->
+            ?debugFmt("Unexpected msg: ~p~n", [Other]),
+            data_sink(Ref, Acc, Done)
+    end.
+
+wait_for_it(Sink, Ref) ->
+    S = self(),
+    Sink ! {'done?', S, Ref},
+    receive
+        {ok, Ref, true} ->
+            Sink ! {gimmie, S, Ref},
+            receive
+                {ok, Ref, Data} ->
+                    Data;
+                {ok, ORef, _} ->
+                    ?debugFmt("Received data for older run: ~p~n", [ORef])
+            end;
+        {ok, Ref, false} ->
+            timer:sleep(100),
+            wait_for_it(Sink, Ref);
+        {ok, ORef, _} ->
+            ?debugFmt("Received data for older run: ~p~n", [ORef])
+    end.
