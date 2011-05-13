@@ -93,19 +93,18 @@ postcondition(#state{postings=Postings}, {call,_,info,[_,I,F,T]}, V) ->
     {ok, [{T, W}]} = V,
     ok == ?assertEqual(length(L), W);
 postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
-    L = [{I,F,T,V,-1*TS,P} || {I,F,T,V,P,TS} <- Postings],
     %% NOTE: The order in which fold returns postings is not
     %% deterministic thus both must be sorted.
     ok == ?assertEqual(lists:sort(Postings), lists:sort(V));
 postcondition(#state{postings=Postings},
               {call,_,stream,[_,{I,F,T,_,_,_}]}, V) ->
-    L = [{V,P} || {Ii,Ff,Tt,V,P,_} <- Postings,
+    L = [{Vv,P} || {Ii,Ff,Tt,Vv,P,_} <- Postings,
                   (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     ok == ?assertEqual(L, V);
 postcondition(#state{postings=Postings},
               {call,_,range,[_,{I,F,ST,ET},all]}, V) ->
     L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
-    L2 = [{V,P} || {Ii,Ff,Tt,V,_,P} <- L1,
+    L2 = [{Vv,P} || {Ii,Ff,Tt,Vv,_,P} <- L1,
                    (I == Ii) andalso (F == Ff)
                        andalso (ST =< Tt) andalso (ET >= Tt)],
     %% TODO This is actually testing the wrong property b/c there is
@@ -115,8 +114,6 @@ postcondition(#state{postings=Postings},
 
     %% L3 = lists:sort((ordsets:from_list(L2)),
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
-    Foo = [{Ii,Ff,TTT} || {Ii,Ff,TTT,_,_,_} <- Postings,
-                  (I == Ii) andalso (F == Ff)],
     ok == ?assertEqual(L3, lists:sort(V));
 postcondition(_,_,_) -> true.
 
@@ -127,8 +124,13 @@ postcondition(_,_,_) -> true.
 g_size() ->
     choose(64, 1024).
 
+g_ms() ->
+    choose(100, 5000).
+
 g_settings() ->
-    [g_size(), g_size()].
+    [g_size(), g_size(), g_ms(), choose(1,20), g_size(), g_size(),
+     g_size(), g_ms(), g_size(), g_size(), choose(1,20), choose(0,20),
+     choose(0,9)].
 
 g_pos_tstamp() ->
     choose(0, ?POW_2(31)).
@@ -164,11 +166,25 @@ g_range_query(Postings) ->
 %% wrappers
 %% ====================================================================
 
-init([BRS,BDWS]) ->
+init([BRS,BDWS,BDWM,MCS,SQRAS,SCRAS,SFBSandSDWS,SDWM,SFRS,SBS,
+      SVSS,SVCT,SVCL]) ->
     Root = "/tmp/test/prop_api",
     os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
     set(buffer_rollover_size, BRS),
     set(buffer_delayed_write_size, BDWS),
+    set(buffer_delayed_write_ms, BDWM),
+    set(max_compact_segments, MCS),
+    set(segment_query_read_ahead_size, SQRAS),
+    set(segment_compact_read_ahead_size, SCRAS),
+    set(segment_file_buffer_size, SFBSandSDWS),
+    set(segment_delayed_write_size, SFBSandSDWS),
+    set(segment_delayed_write_ms, SDWM),
+    set(segment_full_read_size, SFRS),
+    set(segment_block_size, SBS),
+    set(segment_values_staging_size, SVSS),
+    set(segment_values_compression_threshold, SVCT),
+    set(segment_values_compression_level, SVCL),
+
     merge_index:start_link(Root),
     {ok, Pid} = merge_index:start_link(Root),
     Pid.
