@@ -31,10 +31,11 @@ prop_api() ->
                 case Res of
                     ok -> ok;
                     _ -> io:format(user,
+                                   "QC Commands: ~p~n"
                                    "QC History: ~p~n"
                                    "QC State: ~p~n"
                                    "QC result: ~p~n",
-                                   [H, S, Res])
+                                   [Cmds, H, S, Res])
                 end,
 
                 Pid = S#state.server_pid,
@@ -61,7 +62,9 @@ command(S) ->
            {call,?MODULE,is_empty, [P]},
            {call,?MODULE,info, [P, g_posting(Postings)]},
            {call,?MODULE,fold, [P, fun fold_fun/7, []]},
-           {call,?MODULE,stream, [P, g_posting(Postings)]}]).
+           {call,?MODULE,stream, [P, g_posting(Postings)]},
+           %% TODO don't hardcode size to 'all'
+           {call,?MODULE,range, [P, g_range_query(Postings), all]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
     S#state{server_pid=Pid};
@@ -99,6 +102,22 @@ postcondition(#state{postings=Postings},
     L = [{V,P} || {Ii,Ff,Tt,V,P,_} <- Postings,
                   (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     ok == ?assertEqual(L, V);
+postcondition(#state{postings=Postings},
+              {call,_,range,[_,{I,F,ST,ET},all]}, V) ->
+    L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
+    L2 = [{V,P} || {Ii,Ff,Tt,V,_,P} <- L1,
+                   (I == Ii) andalso (F == Ff)
+                       andalso (ST =< Tt) andalso (ET >= Tt)],
+    %% TODO This is actually testing the wrong property b/c there is
+    %% currently a bug in the range call that causes Props vals to be
+    %% lost -- https://issues.basho.com/show_bug.cgi?id=1099 --
+    %% uncomment the following line when it's fixed
+
+    %% L3 = lists:sort((ordsets:from_list(L2)),
+    L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
+    Foo = [{Ii,Ff,TTT} || {Ii,Ff,TTT,_,_,_} <- Postings,
+                  (I == Ii) andalso (F == Ff)],
+    ok == ?assertEqual(L3, lists:sort(V));
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
@@ -118,7 +137,10 @@ g_posting() ->
     {g_i(), g_f(), g_t(), g_value(), g_props(), g_pos_tstamp()}.
 
 g_postings() ->
-    list(g_posting()).
+    I = <<"index">>,
+    F = <<"field">>,
+    list(frequency([{10, {I,F,g_t(),g_value(),g_props(),g_pos_tstamp()}},
+                    {1, g_posting()}])).
 
 g_posting(Postings) ->
     case length(Postings) of
@@ -127,6 +149,15 @@ g_posting(Postings) ->
         _ ->
             oneof([elements(Postings),
                    g_posting()])
+    end.
+
+g_range_query(Postings) ->
+    case length(Postings) of
+        0 ->
+            {g_i(), g_f(), g_t(), g_t()};
+        Len ->
+            {I,F,ST,_,_,_} = lists:nth(random:uniform(Len), Postings),
+            {I, F, ST, g_t()}
     end.
 
 %% ====================================================================
@@ -161,6 +192,13 @@ stream(Pid, {I,F,T,_,_,_}) ->
     ok = merge_index:stream(Pid, I, F, T, Sink, Ref, Ft),
     wait_for_it(Sink, Ref).
 
+range(Pid, {I, F, ST, ET}, Size) ->
+    Ref = make_ref(),
+    Sink = spawn(?MODULE, data_sink, [Ref, [], false]),
+    Ft = fun(_,_) -> true end,
+    ok = merge_index:range(Pid, I, F, ST, ET, Size, Sink, Ref, Ft),
+    wait_for_it(Sink, Ref).
+
 %% ====================================================================
 %% helpers
 %% ====================================================================
@@ -170,6 +208,14 @@ set(Par, Val) ->
 
 fold_fun(I, F, T, V, P, TS, Acc) ->
     [{I, F, T, V, P, TS}|Acc].
+
+unique_vals({V,P}, Acc) ->
+    case orddict:find(V, Acc) of
+        {ok, _} ->
+            Acc;
+        error ->
+            orddict:store(V, P, Acc)
+    end.
 
 data_sink(Ref, Acc, Done) ->
     receive
