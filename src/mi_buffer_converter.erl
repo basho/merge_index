@@ -74,7 +74,7 @@ init([supervisor, MIServerPid, MIServerRoot]) ->
               {mi_buffer_converter,start_worker,
                [MIServerPid, MIServerRoot]},
               permanent,2000,worker,[mi_buffer_converter]},
-    {ok,{{one_for_all,2,1}, [AChild]}};
+    {ok,{{one_for_all,10,1}, [AChild]}};
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
 %%                         {ok, State, Timeout} |

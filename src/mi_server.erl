@@ -387,6 +387,7 @@ handle_call(is_empty, _From, State) ->
     IsEmpty = (not HasBufferData) andalso (not HasSegmentData),
     {reply, IsEmpty, State};
 
+%% TODO what about resetting next_id?
 handle_call(drop, _From, State) ->
     #state { buffers=Buffers, segments=Segments } = State,
 
@@ -441,31 +442,42 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
     %% Clean up by clearing delete flag on the segment, adding delete
     %% flag to the buffer, and telling the system to delete the buffer
     %% as soon as the last lock is released.
-    clear_deleteme_flag(mi_segment:filename(SegmentWO)),
-    BName = mi_buffer:filename(Buffer),
-    set_deleteme_flag(BName),
-    NewLocks = mi_locks:when_free(BName, fun() -> mi_buffer:delete(Buffer) end, Locks),
+    case lists:member(Buffer, Buffers) of
+        true ->
+            clear_deleteme_flag(mi_segment:filename(SegmentWO)),
+            BName = mi_buffer:filename(Buffer),
+            set_deleteme_flag(BName),
+            NewLocks = mi_locks:when_free(BName,
+                                          fun() ->
+                                                  mi_buffer:delete(Buffer)
+                                          end, Locks),
 
-    %% Open the segment as read only...
-    SegmentRO = mi_segment:open_read(mi_segment:filename(SegmentWO)),
+            %% Open the segment as read only...
+            SegmentRO = mi_segment:open_read(mi_segment:filename(SegmentWO)),
 
-    %% Update state...
-    NewSegments = [SegmentRO|Segments],
-    NewState = State#state {
-        locks=NewLocks,
-        buffers=Buffers -- [Buffer],
-        segments=NewSegments
-    },
+            %% Update state...
+            NewSegments = [SegmentRO|Segments],
+            NewState = State#state {
+                         locks=NewLocks,
+                         buffers=Buffers -- [Buffer],
+                         segments=NewSegments
+                        },
 
-    %% Give us the opportunity to do a merge...
-    SegmentsToMerge = get_segments_to_merge(NewSegments),
-    case length(SegmentsToMerge) of
-        Num when Num =< 2 orelse is_tuple(IsCompacting) -> 
-            ok;
-        _ -> 
-            mi_scheduler:schedule_compaction(self())
-    end,
-    {noreply, NewState};
+            %% Give us the opportunity to do a merge...
+            SegmentsToMerge = get_segments_to_merge(NewSegments),
+            case length(SegmentsToMerge) of
+                Num when Num =< 2 orelse is_tuple(IsCompacting) ->
+                    ok;
+                _ ->
+                    mi_scheduler:schedule_compaction(self())
+            end,
+            {noreply, NewState};
+        false ->
+            error_logger:warning_msg("buffer_to_segment cast received"
+                                     " for non-existent buffer, probably"
+                                     " because drop was called~n"),
+            {noreply, State}
+    end;
 
 handle_cast({register_buffer_converter, ConverterWorker},
             #state{buffer_converter={ConverterSup,_},
