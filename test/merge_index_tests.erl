@@ -22,11 +22,18 @@ prop_api() ->
     ok = application:start(sasl),
     %% Comment out following line to be spammed with SASL reports
     error_logger:delete_report_handler(sasl_report_tty_h),
-    ok = application:start(merge_index),
 
     ?FORALL(Cmds, commands(?MODULE),
             begin
+                application:stop(merge_index),
+                ok = application:start(merge_index),
+
                 {H, S, Res} = run_commands(?MODULE, Cmds),
+
+                Pid = S#state.server_pid,
+                if Pid /= undefined -> merge_index:stop(Pid);
+                   true -> ok
+                end,
 
                 case Res of
                     ok -> ok;
@@ -36,11 +43,6 @@ prop_api() ->
                                    "QC State: ~p~n"
                                    "QC result: ~p~n",
                                    [Cmds, H, S, Res])
-                end,
-
-                Pid = S#state.server_pid,
-                if Pid /= undefined -> merge_index:stop(Pid);
-                   true -> ok
                 end,
 
                 aggregate(command_names(Cmds), Res == ok)
@@ -64,7 +66,8 @@ command(S) ->
            {call,?MODULE,fold, [P, fun fold_fun/7, []]},
            {call,?MODULE,stream, [P, g_posting(Postings)]},
            %% TODO don't hardcode size to 'all'
-           {call,?MODULE,range, [P, g_range_query(Postings), all]}]).
+           {call,?MODULE,range, [P, g_range_query(Postings), all]},
+           {call,?MODULE,drop, [P]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
     S#state{server_pid=Pid};
@@ -75,6 +78,8 @@ next_state(S, _Res, {call,_,index,[_,Postings]}) ->
             Postings0 = S#state.postings,
             S#state{postings=Postings0++Postings}
     end;
+next_state(S=#state{postings=Postings}, _Res, {call,_,drop,_}) ->
+    S#state{postings=[]};
 next_state(S, _Res, {call,_,_,_}) -> S.
 
 precondition(_,_) ->
@@ -115,6 +120,8 @@ postcondition(#state{postings=Postings},
     %% L3 = lists:sort((ordsets:from_list(L2)),
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
     ok == ?assertEqual(L3, lists:sort(V));
+postcondition(#state{postings=[]}, {call,_,drop,_}, V) ->
+    ok == ?assertEqual(ok, V);
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
@@ -214,6 +221,9 @@ range(Pid, {I, F, ST, ET}, Size) ->
     Ft = fun(_,_) -> true end,
     ok = merge_index:range(Pid, I, F, ST, ET, Size, Sink, Ref, Ft),
     wait_for_it(Sink, Ref).
+
+drop(Pid) ->
+    merge_index:drop(Pid).
 
 %% ====================================================================
 %% helpers
