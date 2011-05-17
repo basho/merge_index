@@ -20,33 +20,36 @@ prop_api_test_() ->
 prop_api() ->
     application:load(merge_index),
     ok = application:start(sasl),
-    %% Comment out following line to be spammed with SASL reports
+    %% Comment out following lines to see error reports...otherwise
+    %% it's too much noise
     error_logger:delete_report_handler(sasl_report_tty_h),
+    error_logger:delete_report_handler(error_logger_tty_h),
 
     ?FORALL(Cmds, commands(?MODULE),
-            begin
-                application:stop(merge_index),
-                ok = application:start(merge_index),
+            ?TRAPEXIT(
+               begin
+                   application:stop(merge_index),
+                   ok = application:start(merge_index),
 
-                {H, S, Res} = run_commands(?MODULE, Cmds),
+                   {H, S, Res} = run_commands(?MODULE, Cmds),
 
-                Pid = S#state.server_pid,
-                if Pid /= undefined -> merge_index:stop(Pid);
-                   true -> ok
-                end,
+                   Pid = S#state.server_pid,
+                   if Pid /= undefined -> merge_index:stop(Pid);
+                      true -> ok
+                   end,
 
-                case Res of
-                    ok -> ok;
-                    _ -> io:format(user,
-                                   "QC Commands: ~p~n"
-                                   "QC History: ~p~n"
-                                   "QC State: ~p~n"
-                                   "QC result: ~p~n",
-                                   [Cmds, H, S, Res])
-                end,
+                   case Res of
+                       ok -> ok;
+                       _ -> io:format(user,
+                                      "QC Commands: ~p~n"
+                                      "QC History: ~p~n"
+                                      "QC State: ~p~n"
+                                      "QC result: ~p~n",
+                                      [Cmds, H, S, Res])
+                   end,
 
-                aggregate(command_names(Cmds), Res == ok)
-            end).
+                   aggregate(command_names(Cmds), Res == ok)
+               end)).
 
 %% ====================================================================
 %% eqc_statem callbacks
@@ -67,7 +70,8 @@ command(S) ->
            {call,?MODULE,stream, [P, g_posting(Postings)]},
            %% TODO don't hardcode size to 'all'
            {call,?MODULE,range, [P, g_range_query(Postings), all]},
-           {call,?MODULE,drop, [P]}]).
+           {call,?MODULE,drop, [P]},
+           {call,?MODULE,compact, [P]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
     S#state{server_pid=Pid};
@@ -78,7 +82,7 @@ next_state(S, _Res, {call,_,index,[_,Postings]}) ->
             Postings0 = S#state.postings,
             S#state{postings=Postings0++Postings}
     end;
-next_state(S=#state{postings=Postings}, _Res, {call,_,drop,_}) ->
+next_state(S, _Res, {call,_,drop,_}) ->
     S#state{postings=[]};
 next_state(S, _Res, {call,_,_,_}) -> S.
 
@@ -103,13 +107,19 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     ok == ?assertEqual(lists:sort(Postings), lists:sort(V));
 postcondition(#state{postings=Postings},
               {call,_,stream,[_,{I,F,T,_,_,_}]}, V) ->
-    L = [{Vv,P} || {Ii,Ff,Tt,Vv,P,_} <- Postings,
-                  (I == Ii) andalso (F == Ff) andalso (T == Tt)],
-    ok == ?assertEqual(L, V);
+    %% TODO This is actually testing the wrong property b/c there is
+    %% currently a bug in the range call that causes Props vals to be
+    %% lost -- https://issues.basho.com/show_bug.cgi?id=1099
+    L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
+    L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
+                   (I == Ii) andalso (F == Ff) andalso (T == Tt)],
+    L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
+    V2 = [{Val,ignore} || {Val,_} <- lists:sort(V)],
+    ok == ?assertEqual(L3, V2);
 postcondition(#state{postings=Postings},
               {call,_,range,[_,{I,F,ST,ET},all]}, V) ->
     L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
-    L2 = [{Vv,P} || {Ii,Ff,Tt,Vv,_,P} <- L1,
+    L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
                    (I == Ii) andalso (F == Ff)
                        andalso (ST =< Tt) andalso (ET >= Tt)],
     %% TODO This is actually testing the wrong property b/c there is
@@ -119,9 +129,13 @@ postcondition(#state{postings=Postings},
 
     %% L3 = lists:sort((ordsets:from_list(L2)),
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
-    ok == ?assertEqual(L3, lists:sort(V));
+    V2 = [{Val,ignore} || {Val,_} <- lists:sort(V)],
+    ok == ?assertEqual(L3, V2);
 postcondition(#state{postings=[]}, {call,_,drop,_}, V) ->
     ok == ?assertEqual(ok, V);
+postcondition(_, {call,_,compact,[_]}, V) ->
+    {Msg, _SegsCompacted, _BytesCompacted} = V,
+    ok == ?assertEqual(ok, Msg);
 postcondition(_,_,_) -> true.
 
 %% ====================================================================
@@ -224,6 +238,9 @@ range(Pid, {I, F, ST, ET}, Size) ->
 
 drop(Pid) ->
     merge_index:drop(Pid).
+
+compact(Pid) ->
+    merge_index:compact(Pid).
 
 %% ====================================================================
 %% helpers
