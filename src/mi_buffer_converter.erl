@@ -126,7 +126,7 @@ handle_cast({convert, Root, Buffer}, #state{mi_root=Root}=State) ->
     catch
         error:badarg ->
             error_logger:warning_msg("`convert` attempted to work with a"
-                                     " non-existant buffer, probably because"
+                                     " nonexistent buffer, probably because"
                                      " drop was called~n"),
             {noreply, State}
     end;
