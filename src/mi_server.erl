@@ -473,7 +473,7 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
             end,
             {noreply, NewState};
         false ->
-            error_logger:warning_msg("buffer_to_segment cast received"
+            error_logger:warning_msg("`buffer_to_segment` cast received"
                                      " for non-existent buffer, probably"
                                      " because drop was called~n"),
             {noreply, State}
