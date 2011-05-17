@@ -20,7 +20,7 @@
     %% API
     start_link/1,
     stop/1,
-    index/7, index/2, 
+    index/2,
     stream/7,
     range/9,
     info/4,
@@ -50,11 +50,6 @@ start_link(Root) ->
 -spec stop(pid()) -> ok.
 stop(ServerPid) ->
     mi_server:stop(ServerPid).
-
-%% @doc Index the IFT with the supplied `Value', `Props' and
-%% `Timestamp'.
-index(ServerPid, Index, Field, Term, Value, Props, Timestamp) ->
-    index(ServerPid, [{Index, Field, Term, Value, Props, Timestamp}]).
 
 %% @doc Index `Postings'.
 -spec index(pid(), [posting()]) -> ok.
