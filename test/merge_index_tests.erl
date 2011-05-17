@@ -91,8 +91,8 @@ precondition(_,_) ->
 
 postcondition(S, {call,_,is_empty,_}, V) ->
     case S#state.postings of
-        [] -> V =:= true;
-        _ -> V =:= false
+        [] -> ok == ?assertEqual(true, V);
+        _ -> ok == ?assertEqual(false, V)
     end;
 postcondition(_, {call,_,index,_}, V) ->
     ok == ?assertEqual(ok, V);
