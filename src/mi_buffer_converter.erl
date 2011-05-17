@@ -107,21 +107,29 @@ handle_call(_Request, _From, State) ->
 %%--------------------------------------------------------------------
 handle_cast({convert, Root, Buffer}, #state{mi_root=Root}=State) ->
     %% Calculate the segment filename, open the segment, and convert.
-    SNum  = mi_server:get_id_number(mi_buffer:filename(Buffer)),
-    SName = filename:join(Root, "segment." ++ integer_to_list(SNum)),
+    try
+        SNum  = mi_server:get_id_number(mi_buffer:filename(Buffer)),
+        SName = filename:join(Root, "segment." ++ integer_to_list(SNum)),
 
-    case mi_server:has_deleteme_flag(SName) of
-        true ->
-            %% remove files from a previously-failed conversion
-            file:delete(mi_segment:data_file(SName)),
-            file:delete(mi_segment:offsets_file(SName));
-        false ->
-            mi_server:set_deleteme_flag(SName)
-    end,
-    SegmentWO = mi_segment:open_write(SName),
-    mi_segment:from_buffer(Buffer, SegmentWO),
-    mi_server:buffer_to_segment(State#state.mi_server, Buffer, SegmentWO),
-    {noreply, State};
+        case mi_server:has_deleteme_flag(SName) of
+            true ->
+                %% remove files from a previously-failed conversion
+                file:delete(mi_segment:data_file(SName)),
+                file:delete(mi_segment:offsets_file(SName));
+            false ->
+                mi_server:set_deleteme_flag(SName)
+        end,
+        SegmentWO = mi_segment:open_write(SName),
+        mi_segment:from_buffer(Buffer, SegmentWO),
+        mi_server:buffer_to_segment(State#state.mi_server, Buffer, SegmentWO),
+        {noreply, State}
+    catch
+        error:badarg ->
+            error_logger:warning_msg("`convert` attempted to work with a"
+                                     " non-existant buffer, probably because"
+                                     " drop was called~n"),
+            {noreply, State}
+    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
