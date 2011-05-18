@@ -16,6 +16,8 @@
     register_buffer_converter/2,
     buffer_to_segment/3,
     stop/1,
+    lookup/5,
+    range/7,
     %% GEN SERVER
     init/1,
     handle_call/3,
@@ -56,6 +58,21 @@ register_buffer_converter(ServerPid, ConverterPid) ->
 
 buffer_to_segment(ServerPid, Buffer, SegmentWO) ->
     gen_server:cast(ServerPid, {buffer_to_segment, Buffer, SegmentWO}).
+
+lookup(Server, Index, Field, Term, Filter) ->
+    Ref = make_ref(),
+    ok = gen_server:call(Server,
+                         {lookup, Index, Field, Term, Filter, self(), Ref},
+                         infinity),
+    {ok, Ref}.
+
+range(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
+    Ref = make_ref(),
+    ok = gen_server:call(Server,
+                         {range, Index, Field, StartTerm, EndTerm, Size,
+                          Filter, self(), Ref},
+                         infinity),
+    {ok, Ref}.
 
 stop(Pid) ->
     gen_server:call(Pid, stop).
@@ -253,7 +270,7 @@ handle_call({info, Index, Field, Term}, _From, State) ->
     %% Return...
     {reply, {ok, Counts}, State};
 
-handle_call({stream, Index, Field, Term, Pid, Ref, FilterFun}, _From, State) ->
+handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
     %% Get the IDs...
     #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
 
@@ -271,23 +288,13 @@ handle_call({stream, Index, Field, Term, Pid, Ref, FilterFun}, _From, State) ->
 
     %% Spawn a streaming function...
     StreamPid = spawn_link(fun() ->
-                       F = fun(Results) ->
-                                   WrappedFilter = fun({Value, Props}) -> 
-                                                           FilterFun(Value, Props) == true
-                                                   end,
-                                   case lists:filter(WrappedFilter, Results) of
-                                       [] -> 
-                                           skip;
-                                       FilteredResults ->
-                                           Pid ! {result_vec, FilteredResults, Ref}
-                                   end
-                           end,
                        try
-                           stream(Index, Field, Term, F, Buffers, Segments)
+                           lookup(Index, Field, Term, Filter, Pid, Ref,
+                                  Buffers, Segments)
                        catch Type : Error ->
                                ?PRINT({Type, Error, erlang:get_stacktrace()})
                        after
-                           Pid ! {result, '$end_of_table', Ref}
+                           Pid ! {eof, Ref}
                        end
                end),
 
@@ -300,7 +307,8 @@ handle_call({stream, Index, Field, Term, Pid, Ref, FilterFun}, _From, State) ->
     {reply, ok, State#state { locks=NewLocks1,
                               stream_range_pids=NewPids }};
     
-handle_call({range, Index, Field, StartTerm, EndTerm, Size, Pid, Ref, FilterFun}, _From, State) ->
+handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
+            _From, State) ->
     #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
 
     %% Add locks to all buffers...
@@ -316,19 +324,9 @@ handle_call({range, Index, Field, StartTerm, EndTerm, Size, Pid, Ref, FilterFun}
     NewLocks1 = lists:foldl(F2, NewLocks, Segments),
 
     RangePid = spawn_link(fun() ->
-                       F = fun(Results) ->
-                                   WrappedFilter = fun({Value, Props}) -> 
-                                                           FilterFun(Value, Props) == true
-                                                   end,
-                                   case lists:filter(WrappedFilter, Results) of
-                                       [] -> 
-                                           skip;
-                                       FilteredResults ->
-                                           Pid ! {result_vec, FilteredResults, Ref}
-                                   end
-                           end,
-                       range(Index, Field, StartTerm, EndTerm, Size, F, Buffers, Segments),
-                       Pid ! {result, '$end_of_table', Ref}
+                       range(Index, Field, StartTerm, EndTerm, Size, Filter,
+                             Pid, Ref, Buffers, Segments),
+                       Pid ! {eof, Ref}
                end),
 
     NewPids = [ #stream_range{pid=RangePid,
@@ -568,41 +566,40 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% Merge-sort the results from Iterators, and stream to the pid.
-stream(Index, Field, Term, F, Buffers, Segments) ->
-    %% Put together the group iterator...
+lookup(Index, Field, Term, Filter, Pid, Ref, Buffers, Segments) ->
     BufferIterators = [mi_buffer:iterator(Index, Field, Term, X) || X <- Buffers],
     SegmentIterators = [mi_segment:iterator(Index, Field, Term, X) || X <- Segments],
     GroupIterator = build_iterator_tree(BufferIterators ++ SegmentIterators),
 
-    %% Start streaming...
-    stream_or_range_inner(F, undefined, GroupIterator(), []),
+    iterate(Filter, Pid, Ref, undefined, GroupIterator(), []),
     ok.
 
-range(Index, Field, StartTerm, EndTerm, Size, F, Buffers, Segments) ->
-    %% Put together the group iterator...
+range(Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref,
+      Buffers, Segments) ->
     BufferIterators = lists:flatten([mi_buffer:iterators(Index, Field, StartTerm, EndTerm, Size, X) || X <- Buffers]),
     SegmentIterators = lists:flatten([mi_segment:iterators(Index, Field, StartTerm, EndTerm, Size, X) || X <- Segments]),
     GroupIterator = build_iterator_tree(BufferIterators ++ SegmentIterators),
 
-    %% Start rangeing...
-    stream_or_range_inner(F, undefined, GroupIterator(), []),
+    iterate(Filter, Pid, Ref, undefined, GroupIterator(), []),
     ok.
 
-stream_or_range_inner(F, LastValue, Iterator, Acc) 
+iterate(_Filter, Pid, Ref, LastValue, Iterator, Acc) 
   when length(Acc) > ?RESULTVEC_SIZE ->
-    F(lists:reverse(Acc)),
-    stream_or_range_inner(F, LastValue, Iterator, []);
-stream_or_range_inner(F, LastValue, {{Value, _TS, Props}, Iter}, Acc) ->
+    Pid ! {results, lists:reverse(Acc), Ref},
+    iterate(_Filter, Pid, Ref, LastValue, Iterator, []);
+iterate(Filter, _Pid, _Ref, LastValue,
+                      {{Value, _TS, Props}, Iter}, Acc) ->
     IsDuplicate = (LastValue == Value),
     IsDeleted = (Props == undefined),
-    case (not IsDuplicate) andalso (not IsDeleted) of
+    case (not IsDuplicate) andalso (not IsDeleted)
+        andalso Filter(Value, Props) of
         true  -> 
-            stream_or_range_inner(F, Value, Iter(), [{Value, Props}|Acc]);
+            iterate(Filter, _Pid, _Ref, Value, Iter(), [{Value, Props}|Acc]);
         false -> 
-            stream_or_range_inner(F, Value, Iter(), Acc)
+            iterate(Filter, _Pid, _Ref, Value, Iter(), Acc)
     end;
-stream_or_range_inner(F, _, eof, Acc) -> 
-    F(lists:reverse(Acc)),
+iterate(_, Pid, Ref, _, eof, Acc) -> 
+    Pid ! {results, lists:reverse(Acc), Ref},
     ok.
 
 %% Chain a list of iterators into what looks like one single

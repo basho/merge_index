@@ -11,9 +11,9 @@
                 postings=[]}).
 
 prop_api_test_() ->
-    {timeout, 60,
+    {timeout, 600,
      fun() ->
-            ?assert(eqc:quickcheck(eqc:numtests(200,?QC_OUT(prop_api()))))
+            ?assert(eqc:quickcheck(eqc:numtests(300,?QC_OUT(prop_api()))))
      end
     }.
 
@@ -67,9 +67,12 @@ command(S) ->
            {call,?MODULE,is_empty, [P]},
            {call,?MODULE,info, [P, g_posting(Postings)]},
            {call,?MODULE,fold, [P, fun fold_fun/7, []]},
-           {call,?MODULE,stream, [P, g_posting(Postings)]},
+           %% TODO generate filter funs for lookup/range
+           {call,?MODULE,lookup, [P, g_posting(Postings)]},
+           {call,?MODULE,lookup_sync, [P, g_posting(Postings)]},
            %% TODO don't hardcode size to 'all'
            {call,?MODULE,range, [P, g_range_query(Postings), all]},
+           {call,?MODULE,range_sync, [P, g_range_query(Postings), all]},
            {call,?MODULE,drop, [P]},
            {call,?MODULE,compact, [P]}]).
 
@@ -105,8 +108,21 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     %% NOTE: The order in which fold returns postings is not
     %% deterministic thus both must be sorted.
     ok == ?assertEqual(lists:sort(Postings), lists:sort(V));
+
 postcondition(#state{postings=Postings},
-              {call,_,stream,[_,{I,F,T,_,_,_}]}, V) ->
+              {call,_,lookup,[_,{I,F,T,_,_,_}]}, V) ->
+    %% TODO This is actually testing the wrong property b/c there is
+    %% currently a bug in the range call that causes Props vals to be
+    %% lost -- https://issues.basho.com/show_bug.cgi?id=1099
+    L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
+    L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
+                   (I == Ii) andalso (F == Ff) andalso (T == Tt)],
+    L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
+    V2 = [{Val,ignore} || {Val,_} <- lists:sort(iterate(V))],
+    ok == ?assertEqual(L3, V2);
+
+postcondition(#state{postings=Postings},
+              {call,_,lookup_sync,[_,{I,F,T,_,_,_}]}, V) ->
     %% TODO This is actually testing the wrong property b/c there is
     %% currently a bug in the range call that causes Props vals to be
     %% lost -- https://issues.basho.com/show_bug.cgi?id=1099
@@ -116,8 +132,24 @@ postcondition(#state{postings=Postings},
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
     V2 = [{Val,ignore} || {Val,_} <- lists:sort(V)],
     ok == ?assertEqual(L3, V2);
+
 postcondition(#state{postings=Postings},
               {call,_,range,[_,{I,F,ST,ET},all]}, V) ->
+    L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
+    L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
+                   (I == Ii) andalso (F == Ff)
+                       andalso (ST =< Tt) andalso (ET >= Tt)],
+    %% TODO This is actually testing the wrong property b/c there is
+    %% currently a bug in the range call that causes Props vals to be
+    %% lost -- https://issues.basho.com/show_bug.cgi?id=1099 --
+    %% uncomment the following line when it's fixed
+
+    L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
+    V2 = [{Val,ignore} || {Val,_} <- lists:sort(iterate(V))],
+    ok == ?assertEqual(L3, V2);
+
+postcondition(#state{postings=Postings},
+              {call,_,range_sync,[_,{I,F,ST,ET},all]}, V) ->
     L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
     L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
                    (I == Ii) andalso (F == Ff)
@@ -222,19 +254,21 @@ is_empty(Pid) ->
 fold(Pid, Fun, Acc) ->
     merge_index:fold(Pid, Fun, Acc).
 
-stream(Pid, {I,F,T,_,_,_}) ->
-    Ref = make_ref(),
-    Sink = spawn(?MODULE, data_sink, [Ref, [], false]),
+lookup(Pid, {I,F,T,_,_,_}) ->
     Ft = fun(_,_) -> true end,
-    ok = merge_index:stream(Pid, I, F, T, Sink, Ref, Ft),
-    wait_for_it(Sink, Ref).
+    merge_index:lookup(Pid, I, F, T, Ft).
+
+lookup_sync(Pid, {I,F,T,_,_,_}) ->
+    Ft = fun(_,_) -> true end,
+    merge_index:lookup_sync(Pid, I, F, T, Ft).
 
 range(Pid, {I, F, ST, ET}, Size) ->
-    Ref = make_ref(),
-    Sink = spawn(?MODULE, data_sink, [Ref, [], false]),
     Ft = fun(_,_) -> true end,
-    ok = merge_index:range(Pid, I, F, ST, ET, Size, Sink, Ref, Ft),
-    wait_for_it(Sink, Ref).
+    merge_index:range(Pid, I, F, ST, ET, Size, Ft).
+
+range_sync(Pid, {I, F, ST, ET}, Size) ->
+    Ft = fun(_,_) -> true end,
+    merge_index:range_sync(Pid, I, F, ST, ET, Size, Ft).
 
 drop(Pid) ->
     merge_index:drop(Pid).
@@ -260,37 +294,10 @@ unique_vals({V,P}, Acc) ->
             orddict:store(V, P, Acc)
     end.
 
-data_sink(Ref, Acc, Done) ->
-    receive
-        {result_vec, Data, Ref} ->
-            data_sink(Ref, Acc++Data, false);
-        {result, '$end_of_table', Ref} ->
-            data_sink(Ref, Acc, true);
-        {gimmie, From, Ref} ->
-            From ! {ok, Ref, lists:reverse(Acc)};
-        {'done?', From, Ref} ->
-            From ! {ok, Ref, Done},
-            data_sink(Ref, Acc, Done);
-        Other ->
-            ?debugFmt("Unexpected msg: ~p~n", [Other]),
-            data_sink(Ref, Acc, Done)
-    end.
+iterate(Itr) ->
+    iterate(Itr(), []).
 
-wait_for_it(Sink, Ref) ->
-    S = self(),
-    Sink ! {'done?', S, Ref},
-    receive
-        {ok, Ref, true} ->
-            Sink ! {gimmie, S, Ref},
-            receive
-                {ok, Ref, Data} ->
-                    Data;
-                {ok, ORef, _} ->
-                    ?debugFmt("Received data for older run: ~p~n", [ORef])
-            end;
-        {ok, Ref, false} ->
-            timer:sleep(100),
-            wait_for_it(Sink, Ref);
-        {ok, ORef, _} ->
-            ?debugFmt("Received data for older run: ~p~n", [ORef])
-    end.
+iterate(eof, Acc) ->
+    lists:flatten(lists:reverse(Acc));
+iterate({Res, Itr}, Acc) ->
+    iterate(Itr(), [Res|Acc]).

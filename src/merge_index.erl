@@ -21,8 +21,8 @@
     start_link/1,
     stop/1,
     index/2,
-    stream/7,
-    range/9,
+    lookup/5, lookup_sync/5,
+    range/7, range_sync/7,
     info/4,
     is_empty/1,
     fold/3,
@@ -40,6 +40,9 @@
                     Value::any(),
                     Props::[proplists:property()],
                     Timestamp::integer()}).
+-type(iterator() :: fun(() -> {any(), iterator()} | eof)).
+
+-define(LOOKUP_TIMEOUT, 60000).
 
 %% @doc Start a new merge_index server.
 -spec start_link(string()) -> {ok, Pid::pid()} | ignore | {error, Error::any()}.
@@ -62,22 +65,35 @@ index(ServerPid, Postings) ->
 info(ServerPid, Index, Field, Term) ->
     gen_server:call(ServerPid, {info, Index, Field, Term}, infinity).
 
-%% @doc Stream the results for IFT.
+%% @doc Lookup the results for IFT and return an iterator.  This
+%% allows the caller to process data as it comes in/wants it.
 %%
-%% `Pid' - The client, values will be streamed to this process.
+%% @throws lookup_timeout
 %%
-%% `Ref' - A unique reference for this request.
+%% `Server' - Pid of the server instance.
 %%
-%% `FilterFun' - Used to filter the results.
--spec stream(pid(), index(), field(), mi_term(), pid(), reference(), function()) ->
-                    ok.
-stream(ServerPid, Index, Field, Term, Pid, Ref, FilterFun) ->
-    gen_server:call(ServerPid, 
-        {stream, Index, Field, Term, Pid, Ref, FilterFun}, infinity).
+%% `Filter' - Function used to filter the results.
+-spec lookup(pid(), index(), field(), mi_term(), function()) -> iterator().
+lookup(Server, Index, Field, Term, Filter) ->
+    {ok, Ref} = mi_server:lookup(Server, Index, Field, Term, Filter),
+    make_result_iterator(Ref).
 
-%% @doc Much like `stream/7' except allows one to specify the range of
-%% terms to stream over.  The range is a closed interval meaning that
-%% both `StartTerm' and `EndTerm' are included.
+%% @doc Lookup the results for IFT and return a list.  The caller will
+%% block until the result list is built.
+%%
+%% @throws lookup_timeout
+%%
+%% `Server' - Pid of the server instance.
+%%
+%% `Filter' - Function used to filter the results.
+-spec lookup_sync(pid(), index(), field(), mi_term(), function()) -> list().
+lookup_sync(Server, Index, Field, Term, Filter) ->
+    {ok, Ref} = mi_server:lookup(Server, Index, Field, Term, Filter),
+    make_result_list(Ref).
+
+%% @doc Much like `lookup' except allows one to specify a range of
+%% terms.  The range is a closed interval meaning that both
+%% `StartTerm' and `EndTerm' are included.
 %%
 %% `StartTerm' - The start of the range.
 %%
@@ -85,12 +101,35 @@ stream(ServerPid, Index, Field, Term, Pid, Ref, FilterFun) ->
 %%
 %% `Size' - The size of the term in bytes.
 %%
-%% @see stream/7.
+%% TODO: Pull size out before pull request
+%%
+%% @see lookup/5.
 -spec range(pid(), index(), field(), mi_term(), mi_term(),
-            size(), pid(), reference(), function()) -> ok.
-range(ServerPid, Index, Field, StartTerm, EndTerm, Size, Pid, Ref, FilterFun) ->
-    gen_server:call(ServerPid, 
-        {range, Index, Field, StartTerm, EndTerm, Size, Pid, Ref, FilterFun}, infinity).
+                 size(), function()) -> iterator().
+range(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
+    {ok, Ref} = mi_server:range(Server, Index, Field, StartTerm, EndTerm,
+                                Size, Filter),
+    make_result_iterator(Ref).
+
+%% @doc Much like `lookup_sync' except allows one to specify a range
+%% of terms.  The range is a closed interval meaning that both
+%% `StartTerm' and `EndTerm' are included.
+%%
+%% `StartTerm' - The start of the range.
+%%
+%% `EndTerm' - The end of the range.
+%%
+%% `Size' - The size of the term in bytes.
+%%
+%% TODO: Pull size out before pull request
+%%
+%% @see lookup_sync/5.
+-spec range_sync(pid(), index(), field(), mi_term(), mi_term(),
+                 size(), function()) -> list().
+range_sync(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
+    {ok, Ref} = mi_server:range(Server, Index, Field, StartTerm, EndTerm,
+                                Size, Filter),
+    make_result_list(Ref).
 
 %% @doc Predicate to determine if the buffers AND segments are empty.
 -spec is_empty(pid()) -> boolean().
@@ -125,3 +164,39 @@ drop(ServerPid) ->
                          | {error, Reason::any()}.
 compact(ServerPid) ->
     gen_server:call(ServerPid, start_compaction, infinity).
+
+%%%===================================================================
+%%% Internal Functions
+%%%===================================================================
+
+%% @private
+make_result_iterator(Ref) ->
+    fun() -> result_iterator(Ref) end.
+
+%% @private
+result_iterator(Ref) ->
+    receive
+        {results, Results, Ref} ->
+            {Results, fun() -> result_iterator(Ref) end};
+        {eof, Ref} ->
+            eof
+    after
+        ?LOOKUP_TIMEOUT ->
+            throw(lookup_timeout)
+    end.
+
+%% @private
+make_result_list(Ref) ->
+    make_result_list(Ref, []).
+
+%% @private
+make_result_list(Ref, Acc) ->
+    receive
+        {results, Results, Ref} ->
+            make_result_list(Ref, [Results|Acc]);
+        {eof, Ref} ->
+            lists:flatten(lists:reverse(Acc))
+    after
+        ?LOOKUP_TIMEOUT ->
+            throw(lookup_timeout)
+    end.
