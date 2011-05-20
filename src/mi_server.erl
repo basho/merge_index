@@ -38,7 +38,7 @@
     next_id,
     is_compacting,
     buffer_converter,
-    stream_range_pids,
+    lookup_range_pids,
     buffer_rollover_size
 }).
 
@@ -101,7 +101,7 @@ init([Root]) ->
         next_id  = NextID,
         is_compacting = false,
         buffer_converter = {ConverterSup, undefined},
-        stream_range_pids = [],
+        lookup_range_pids = [],
         buffer_rollover_size=fuzzed_rollover_size()
     },
 
@@ -301,9 +301,9 @@ handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
                               ref=Ref,
                               buffers=Buffers,
                               segments=Segments}
-                | State#state.stream_range_pids ],
+                | State#state.lookup_range_pids ],
     {reply, ok, State#state { locks=NewLocks1,
-                              stream_range_pids=NewPids }};
+                              lookup_range_pids=NewPids }};
     
 handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
             _From, State) ->
@@ -332,9 +332,9 @@ handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
                               ref=Ref,
                               buffers=Buffers,
                               segments=Segments}
-                | State#state.stream_range_pids ],
+                | State#state.lookup_range_pids ],
     {reply, ok, State#state { locks=NewLocks1,
-                              stream_range_pids=NewPids }};
+                              lookup_range_pids=NewPids }};
 
 %% NOTE: The order in which fold returns postings is not deterministic
 %% and is determined by things such as buffer_rollover_size.
@@ -516,7 +516,7 @@ handle_info({'EXIT', ConverterSup, Reason},
     {stop, {buffer_converter_death, Reason}, State};
 
 handle_info({'EXIT', Pid, Reason},
-            #state{stream_range_pids=SRPids}=State) ->
+            #state{lookup_range_pids=SRPids}=State) ->
 
     case lists:keytake(Pid, #stream_range.pid, SRPids) of
         {value, SR, NewSRPids} ->
@@ -547,7 +547,7 @@ handle_info({'EXIT', Pid, Reason},
                                    SR#stream_range.segments),
 
             {noreply, State#state { locks=NewLocks1,
-                                    stream_range_pids=NewSRPids }};
+                                    lookup_range_pids=NewSRPids }};
         false ->
             %% some random other process exited: ignore
             {noreply, State}
