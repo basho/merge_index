@@ -99,10 +99,10 @@ postcondition(S, {call,_,is_empty,_}, V) ->
     end;
 postcondition(_, {call,_,index,_}, V) ->
     ok == ?assertEqual(ok, V);
-postcondition(#state{postings=Postings}, {call,_,info,[_,I,F,T]}, V) ->
-    L = [x || {Ii, Ff, Tt} <- Postings,
+postcondition(#state{postings=Postings}, {call,_,info,[_,{I,F,T,_,_,_}]}, V) ->
+    L = [x || {Ii,Ff,Tt,_,_,_} <- Postings,
               (I == Ii) andalso (F == Ff) andalso (T == Tt)],
-    {ok, [{T, W}]} = V,
+    {ok, W} = V,
     ok == ?assertEqual(length(L), W);
 postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     %% NOTE: The order in which fold returns postings is not

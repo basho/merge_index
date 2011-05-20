@@ -2,7 +2,7 @@
 -import(common, [g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1, g_value/0,
                  g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
                  unique_latest/2, test_spec/2]).
-
+-compile(export_all).
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
@@ -51,7 +51,7 @@ check_range(Root, Entries, Range) ->
     {Index, Field, StartTerm} = Start,
     {Index, Field, EndTerm} = End,
 
-    L1 = [{V, K, P} || {{_, _, _}=IFT, V, K, P} <- Entries,
+    L1 = [{V, K, [{F,T}|P]} || {{_, F, T}=IFT, V, K, P} <- Entries,
                        IFT >= Start, IFT =< End],
 
     Itrs = mi_buffer:iterators(Index, Field, StartTerm, EndTerm, all, Buffer),

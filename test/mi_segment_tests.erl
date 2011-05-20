@@ -3,6 +3,7 @@
                  g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
                  test_spec/2]).
 
+-compile(export_all).
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
@@ -83,7 +84,7 @@ check_range(Root, Entries, Range) ->
     Itrs = mi_segment:iterators(Index, Field, StartTerm, EndTerm, all, Segment),
     L1 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
 
-    L2 = [{V, K, P}
+    L2 = [{V, K, [{Ff,Tt}|P]}
           || {Ii, Ff, Tt, V, K, P} <- fold_iterator(mi_segment:iterator(Segment),
                                                     fun(I,A) -> [I|A] end, []),
              {Ii, Ff, Tt} >= Start, {Ii, Ff, Tt} =< End],
@@ -101,8 +102,8 @@ prop_iter_test(Root) ->
 check_iter(Root, Entries, IFT) ->
     {I, F, T} = IFT,
 
-    L1 = [{Value, Props, Tstamp} ||
-             {{Index, Field, Term, Value}, {Props, Tstamp}}
+    L1 = [{Value, Tstamp, [{Field,Term}|Props] } ||
+             {{Index, Field, Term, Value}, {Tstamp, Props}}
                  <- lists:foldl(fun common:unique_latest/2,
                                 [], lists:sort(Entries)),
              Index =:= I, Field =:= F, Term =:= T],

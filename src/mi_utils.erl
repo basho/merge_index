@@ -26,14 +26,22 @@ ets_keys_1(Table, Key) ->
 
 %% longest_prefix/2 - Given two terms, calculate the longest common
 %% prefix of the terms.
-longest_prefix(A, B) ->
-    list_to_binary(longest_prefix_1(A, B)).
-longest_prefix_1(<<C, A/binary>>, <<C, B/binary>>) ->
-    [C|longest_prefix_1(A, B)];
-longest_prefix_1(undefined, B) ->
-    [B];
-longest_prefix_1(_, _) ->
-    [].
+longest_prefix(A, B) when is_list(A) andalso is_list(B) ->
+    longest_prefix_list(A, B, []);
+longest_prefix(A, B) when is_binary(A) andalso is_binary(B) ->
+    longest_prefix_binary(A, B, []);
+longest_prefix(_, _) ->
+    <<>>.
+
+longest_prefix_list([C|A], [C|B], Acc) ->
+    longest_prefix_list(A, B, [C|Acc]);
+longest_prefix_list(_, _, Acc) ->
+    lists:reverse(Acc).
+
+longest_prefix_binary(<<C, A/binary>>, <<C, B/binary>>, Acc) ->
+    longest_prefix_binary(A, B, [C|Acc]);
+longest_prefix_binary(_, _, Acc) ->
+    lists:reverse(Acc).
 
 %% edit_signature/2 - Given an A term and a B term, return a bitstring
 %% consisting of a 0 bit for each matching char and a 1 bit for each
@@ -43,7 +51,10 @@ edit_signature(A, B) when is_binary(A) andalso is_binary(B) ->
 edit_signature(A, B) when is_integer(A) ->
     edit_signature(<<A:32/integer>>, B);
 edit_signature(A, B) when is_integer(B) ->
-    edit_signature(A, <<B:32/integer>>).
+    edit_signature(A, <<B:32/integer>>);
+edit_signature(_, _) ->
+    <<>>.
+
 
 edit_signature_binary(<<C, A/binary>>, <<C, B/binary>>) ->
     [<<0:1/integer>>|edit_signature_binary(A, B)];
@@ -60,7 +71,10 @@ edit_signature_binary(_, <<>>) ->
 hash_signature(Term) when is_binary(Term)->
     hash_signature_binary(Term, 0);
 hash_signature(Term) when is_integer(Term) ->
-    hash_signature(<<Term:64/integer>>).
+    hash_signature(<<Term:64/integer>>);
+hash_signature(_Term) ->
+    <<>>.
+
 hash_signature_binary(<<C, Rest/binary>>, Acc) ->
     case Acc rem 2 of
         0 -> 

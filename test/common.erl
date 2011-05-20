@@ -4,8 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
 
-g_i() ->
-    non_empty(binary()).
+g_i() -> elements([<<"i1">>,<<"i2">>,<<"i3">>,non_empty(binary())]).
 
 g_f() ->
     non_empty(binary()).

@@ -221,7 +221,13 @@ iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
                     file:read(File, ValuesSize),
                     iterate_by_term(File, CurrKey, KeyInfoList, Key);
                 CurrKey == Key ->
-                    Transform = fun(Value) -> Value end,
+                    {_, Field, Term} = CurrKey,
+                    Transform =
+                        fun({V, K, P}) when is_list(P) ->
+                                {V, K, [{Field, Term}|P]};
+                           (Other) ->
+                                Other
+                        end,
                     WhenDone = fun(_) -> file:close(File), eof end,
                     fun() -> iterate_by_term_values(File, Transform, WhenDone) end;
                 CurrKey > Key ->
@@ -256,13 +262,13 @@ iterate_by_term_values_1([], File, TransformFun, WhenDoneFun) ->
 iterators(Index, Field, StartTerm, EndTerm, Size, Segment) ->
     %% Find the Key containing the offset information we need.
     StartKey = {Index, Field, StartTerm},
-    EndKey = {Index, Field, EndTerm},
     case get_offset_entry(StartKey, Segment) of
         {OffsetEntryKey, {BlockStart, _, _, _}} ->
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_query_read_ahead_size),
             {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
             file:position(FH, BlockStart),
-            iterate_range_by_term(FH, OffsetEntryKey, StartKey, EndKey, Size);
+            iterate_range_by_term(FH, OffsetEntryKey, Index, Field,
+                                  StartTerm, EndTerm, Size);
         undefined ->
             [fun() -> eof end]
     end.
@@ -271,56 +277,75 @@ iterators(Index, Field, StartTerm, EndTerm, Size, Segment) ->
 %% provided range. Keep everything in memory for now. Returns the list
 %% of iterators. TODO - In the future, once we've amassed enough
 %% iterators, write the data out to a separate temporary file.
-iterate_range_by_term(File, BaseKey, StartKey, EndKey, Size) ->
-    iterate_range_by_term_1(File, BaseKey, StartKey, EndKey, Size, false, [], []).
-iterate_range_by_term_1(File, BaseKey, StartKey, EndKey, Size, IterateOverValues, ResultsAcc, IteratorsAcc) ->
+iterate_range_by_term(File, BaseKey, Index, Field, StartTerm, EndTerm, Size) ->
+    iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm,
+                            Size, false, [], []).
+iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm, Size,
+                        IterateOverValues, ResultsAcc, IteratorsAcc) ->
     case read_seg_entry(File) of
         {key, ShrunkenKey} ->
             %% Expand the possibly shrunken key...
-            CurrKey = expand_key(BaseKey, ShrunkenKey),
+            CurrKey = {I, F, T} = expand_key(BaseKey, ShrunkenKey),
 
             %% If the key is smaller than the one we need, keep
             %% jumping. If it's in the range we need, then iterate
             %% values. Otherwise, it's too big, so close the file and
             %% return.
             if 
-                CurrKey < StartKey ->
-                    iterate_range_by_term_1(File, CurrKey, StartKey, EndKey, Size, false, [], IteratorsAcc);
-                CurrKey =< EndKey ->
-                    NewIteratorsAcc = possibly_add_iterator(ResultsAcc, IteratorsAcc),
-                    case Size == 'all' orelse size(element(3, CurrKey)) == Size of
+                CurrKey < {Index, Field, StartTerm} ->
+                    iterate_range_by_term_1(File, CurrKey, Index, Field,
+                                            StartTerm, EndTerm, Size,
+                                            false, [], IteratorsAcc);
+                I == Index andalso F == Field
+                andalso (EndTerm == undefined orelse T =< EndTerm) ->
+                    NewIteratorsAcc = possibly_add_iterator(BaseKey,
+                                                            ResultsAcc,
+                                                            IteratorsAcc),
+                    case Size == 'all' orelse size(StartTerm) == Size of
                         true ->
-                            iterate_range_by_term_1(File, CurrKey, StartKey, EndKey, Size, true, [], NewIteratorsAcc);
+                            iterate_range_by_term_1(File, CurrKey, Index,
+                                                    Field, StartTerm,
+                                                    EndTerm, Size, true,
+                                                    [], NewIteratorsAcc);
                         false ->
-                            iterate_range_by_term_1(File, CurrKey, StartKey, EndKey, Size, false, [], NewIteratorsAcc)
+                            iterate_range_by_term_1(File, CurrKey, Index,
+                                                    Field, StartTerm, EndTerm,
+                                                    Size, false, [],
+                                                    NewIteratorsAcc)
                     end;
-                CurrKey > EndKey ->
+                true ->
                     file:close(File),
-                    possibly_add_iterator(ResultsAcc, IteratorsAcc)
+                    possibly_add_iterator(BaseKey, ResultsAcc, IteratorsAcc)
             end;
-        {values, Results} when IterateOverValues ->
-            iterate_range_by_term_1(File, BaseKey, StartKey, EndKey, Size, true, [Results|ResultsAcc], IteratorsAcc);
         {values, _Results} when not IterateOverValues ->
-            iterate_range_by_term_1(File, BaseKey, StartKey, EndKey, Size, false, [], IteratorsAcc);
+            iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm,
+                                    EndTerm, Size, false, [], IteratorsAcc);
+        {values, Results} when IterateOverValues ->
+            iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm,
+                                    EndTerm, Size, true, [Results|ResultsAcc],
+                                    IteratorsAcc);
         eof ->
             %% Shouldn't get here. If we're here, then the Offset
             %% values are broken in some way.
             file:close(File),
-            possibly_add_iterator(ResultsAcc, IteratorsAcc)
+            possibly_add_iterator(BaseKey, ResultsAcc, IteratorsAcc)
     end.
 
-possibly_add_iterator([], IteratorsAcc) ->
+possibly_add_iterator(_, [], IteratorsAcc) ->
     IteratorsAcc;
-possibly_add_iterator(Results, IteratorsAcc) ->
+possibly_add_iterator({_, Field, Term}, Results, IteratorsAcc) ->
     Results1 = lists:flatten(lists:reverse(Results)),
-    Iterator = fun() -> iterate_list(Results1) end,
+    Iterator = fun() -> iterate_list(Field, Term, Results1) end,
     [Iterator|IteratorsAcc].
     
 %% Turn a list into an iterator.
-iterate_list([]) ->
+iterate_list(_, _, []) ->
     eof;
-iterate_list([H|T]) ->
-    {H, fun() -> iterate_list(T) end}.
+iterate_list(Field, Term, [{V,K,P}|T]) when is_list(P) ->
+    NewH = {V, K, [{Field, Term}|P]},
+    {NewH, fun() -> iterate_list(Field, Term, T) end};
+iterate_list(Field, Term, [H|T]) ->
+    {H, fun() -> iterate_list(Field, Term, T) end}.
 
 %% PRIVATE FUNCTIONS
 

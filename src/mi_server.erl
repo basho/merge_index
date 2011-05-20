@@ -265,10 +265,8 @@ handle_call({info, Index, Field, Term}, _From, State) ->
     BufferCount = [mi_buffer:info(Index, Field, Term, X) || X <- Buffers],
     SegmentCount = [mi_segment:info(Index, Field, Term, X) || X <- Segments],
     TotalCount = lists:sum([0|BufferCount]) + lists:sum([0|SegmentCount]),
-    Counts = [{Term, TotalCount}],
     
-    %% Return...
-    {reply, {ok, Counts}, State};
+    {reply, {ok, TotalCount}, State};
 
 handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
     %% Get the IDs...
@@ -522,7 +520,7 @@ handle_info({'EXIT', Pid, Reason},
 
     case lists:keytake(Pid, #stream_range.pid, SRPids) of
         {value, SR, NewSRPids} ->
-            %% One of our stream or range processes exited
+            %% One of our lookup or range processes exited
 
             case Reason of
                 normal ->
@@ -531,7 +529,7 @@ handle_info({'EXIT', Pid, Reason},
                 _Error ->
                     %% send the end-of-table so the listener exits
                     SR#stream_range.caller !
-                        {result, '$end_of_table', SR#stream_range.ref}
+                        {eof, SR#stream_range.ref}
             end,
 
             %% Remove locks from all buffers...
