@@ -6,11 +6,9 @@
 
 g_i() -> elements([<<"i1">>,<<"i2">>,<<"i3">>,non_empty(binary())]).
 
-g_f() ->
-    non_empty(binary()).
+g_f() -> elements([<<"f1">>,<<"f2">>,<<"f3">>,non_empty(binary())]).
 
-g_t() ->
-    non_empty(binary()).
+g_t() -> elements([<<"t1">>,<<"t2">>,<<"t3">>,non_empty(binary())]).
 
 g_ift() ->
     {g_i(), g_f(), g_t()}.
@@ -20,11 +18,10 @@ g_ift_range(IFTs) ->
               {oneof(IFTs), oneof(IFTs)},
               (End >= Start) andalso (I1 =:= I2) andalso (F1 =:= F2)).
 
-g_value() ->
-    non_empty(binary()).
+g_value() -> elements([<<"v1">>,<<"v2">>,<<"v3">>,non_empty(binary())]).
 
 g_props() ->
-    list({oneof([word_pos, offset]), choose(0, ?POW_2(31))}).
+    elements([[{p, 1}], [{p, 2}],list({p, choose(0, ?POW_2(31))})]).
 
 %% Generate inverted tstamps to match mi_server
 g_tstamp() ->
