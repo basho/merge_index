@@ -1,14 +1,14 @@
 # Overview
 
-`merge_index` is an Erlang library for storing ordered sets on
+MergeIndex is an Erlang library for storing ordered sets on
 disk. It is very similar to an SSTable (in Google's
 Bigtable) or an HFile (in Hadoop).
 
-Basho Technologies developed `merge_index` to serve as the underlying
+Basho Technologies developed MergeIndex to serve as the underlying
 index storage format for Riak Search and the upcoming Secondary Index
 functionality in Riak.
 
-`merge_index` has the following characteristics:
+MergeIndex has the following characteristics:
 
 * Fast write performance; handles "spiky" situations with high write
   loads gracefully.
@@ -30,7 +30,7 @@ And some tradeoffs:
 
 # Data Model
 
-A `merge_index` database is a three-level hierarchy of data. (The
+A MergeIndex database is a three-level hierarchy of data. (The
 chosen terminology reflects merge_index's roots as a storage engine
 for document data, but it can be considered a general purpose index.)
 
@@ -60,7 +60,7 @@ These six fields together form a **Posting**. For example:
 
 # API
 
-* `merge_index:start_link(DataDir)` - Open a `merge_index`
+* `merge_index:start_link(DataDir)` - Open a MergeIndex
   database. Note that the database is NOT thread safe, and this is NOT
   enforced by the software. You should only have one Pid per
   directory, otherwise your data will be corrupted.
@@ -102,7 +102,7 @@ These six fields together form a **Posting**. For example:
 
 * `merge_index:compact(Pid)` - Trigger a compaction, if necessary.
 
-* `merge_index:drop(Pid)` - Delete a `merge_index` database. This will
+* `merge_index:drop(Pid)` - Delete a MergeIndex database. This will
   delete your data.
   
 * `merge_index:stop(Pid)` - Close a merge_index database.
@@ -160,7 +160,7 @@ performs a lookup and range query.
 
 # Architecture
 
-At a high level, `merge_index` is a collection of one or more
+At a high level, MergeIndex is a collection of one or more
 in-memory **buffers** storing recently written data, plus one or more
 immutable **segments** storing older data. As data is written, the
 buffers are converted to segments, and small segments are compacted
@@ -178,7 +178,7 @@ the key is not found, there is no disk penalty.
 
 ## MI Server (`mi_server` module)
 
-The mi\_server module holds the coordinating logic of `merge_index`. It
+The mi\_server module holds the coordinating logic of MergeIndex. It
 keeps track of which buffers and segments exist, handles incoming
 writes, manages locks on buffers and segments, and spawns new
 processes to respond to queries.
@@ -223,17 +223,17 @@ iterators return the values for a range of keys.
 ## Buffers (`mi_buffer` module)
 
 A buffer consists of an in-memory Erlang ETS table plus an append only
-log file. All new data written to a `merge_index` database is first
+log file. All new data written to a MergeIndex database is first
 written to the buffer. Once a buffer reaches a certain size, it is
 converted to a segment.
 
-`merge_index` opens the ETS table as a `duplicate_bag`, keyed on `{Index, Field,
+MergeIndex opens the ETS table as a `duplicate_bag`, keyed on `{Index, Field,
 Term}`. Postings are written to the buffer in a batch. 
 
-At query time, the `merge_index` performs an `ets:lookup/N` to retrieve
+At query time, the MergeIndex performs an `ets:lookup/N` to retrieve
 matching postings, sorts them, and wraps them in an iterator.
 
-Range queries work slightly differently. `merge_index` gets a list of
+Range queries work slightly differently. MergeIndex gets a list of
 keys from the table, filters the keys according to what matches the
 range, and then returns an iterator for each key. 
 
@@ -309,7 +309,7 @@ to create a new, larger segment, and deletes the old segments. In the
 process, duplicate or deleted values (determined by a tombstone) are
 removed. The `mi_scheduler` module ensures that only one compaction
 occurs at a time on a single Erlang VM, even when multiple
-`merge_index` databases are opened.
+MergeIndex databases are opened.
 
 The advantage of compaction is that it moves the values for a given
 key closer together on disk, and reduces the number of disk seeks
@@ -347,7 +347,7 @@ into a segment.
 
 ## Locking (`mi_locks` module)
 
-`merge_index` uses a functional locking structure called to manage
+MergeIndex uses a functional locking structure called to manage
 locks on buffers and segments. The locks are really a form of
 reference counting. During query time, the system opens iterators
 against all available buffers and segments. This increments a separate
@@ -365,13 +365,13 @@ released and the obsolete buffers or segments deleted.
 
 # Configuration Settings
 
-`merge_index` exposes a number of dials to tweak operations and RAM
+MergeIndex exposes a number of dials to tweak operations and RAM
 usage. 
 
-The most important `merge_index` setting in terms of memory usage is
+The most important MergeIndex setting in terms of memory usage is
 `buffer_rollover_size`. This affects how large the buffer is allowed
 to grow, in bytes, before getting converted to an on-disk
-segment. The higher this number, the less frequently a `merge_index`
+segment. The higher this number, the less frequently a MergeIndex
 database will need compactions.
 
 The second most important settings for memory usage are a combination
@@ -382,7 +382,7 @@ be as large or larger than the
 `buffer_rollover_size`. 
 
 `max_compact_segments` is the maximum number of segments to compact at
-one time. The higher this number, the more segments `merge_index` can
+one time. The higher this number, the more segments MergeIndex can
 involve in each compaction. In the worst case, a compaction could take
 (`segment_full_read_size` * `max_compact_segments`) bytes of RAM.
 
@@ -394,7 +394,7 @@ memory usage, and exist mainly for tweaking and special cases.
   of ETS table size, not the size the data will take on disk. Because
   of compaction, the actual segment on disk may be substantially
   smaller than this number. Default is 1MB. This setting is one of
-  the biggest factors in determining how much memory `merge_index`
+  the biggest factors in determining how much memory MergeIndex
   will use, and how often compaction is needed. Setting this to a very
   small number (ie: 100k) will cause buffers to roll out to disk very
   rapidly, but compaction will trigger more often. Setting this to a
@@ -471,7 +471,7 @@ A number of configuration settings are fuzzed:
 * `buffer_delayed_write_ms` by 10%
 
 "Fuzzed" means that the actual value is increased or decreased by a
-certain random percent. If you open multiple `merge_index` databases
+certain random percent. If you open multiple MergeIndex databases
 and write to them with an evenly balanced load, then all of the
 buffers tend to roll over at the same time. Fuzzing spaces out the
 rollovers.
