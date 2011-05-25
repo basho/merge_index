@@ -1,5 +1,8 @@
 -module(common).
 -compile(export_all).
+
+-ifdef(EQC).
+
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
@@ -74,3 +77,4 @@ test_spec(Root, F, Runs) ->
              ?assertEqual({Name, true}, {Name, R})
      end}.
 
+-endif.
