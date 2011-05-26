@@ -101,8 +101,6 @@ lookup_sync(Server, Index, Field, Term, Filter) ->
 %%
 %% `Size' - The size of the term in bytes.
 %%
-%% TODO: Pull size out before pull request
-%%
 %% @see lookup/5.
 -spec range(pid(), index(), field(), mi_term(), mi_term(),
                  size(), function()) -> iterator().
@@ -120,8 +118,6 @@ range(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
 %% `EndTerm' - The end of the range.
 %%
 %% `Size' - The size of the term in bytes.
-%%
-%% TODO: Pull size out before pull request
 %%
 %% @see lookup_sync/5.
 -spec range_sync(pid(), index(), field(), mi_term(), mi_term(),

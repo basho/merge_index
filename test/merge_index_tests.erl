@@ -106,14 +106,14 @@ postcondition(#state{postings=Postings}, {call,_,info,[_,{I,F,T,_,_,_}]}, V) ->
               (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     {ok, W} = V,
 
-    %% Assert that the weight is _greater than or equal_ b/c if the
+    %% Assert that the weight is _greater than or equal_ b/c the
     %% bloom filter could cause false positives.
     ok == ?assert(W >= length(L));
 postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     %% NOTE: The order in which fold returns postings is not
     %% deterministic.
 
-    %% Each memeber of V should be a memeber of Postings, they aren't
+    %% Each member of V should be a memeber of Postings, they aren't
     %% exactly equal b/c some of the dups might have been removed
     %% underneath -- this is confusing behavior if you ask me.
     V2 = lists:sort(V),
