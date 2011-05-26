@@ -78,7 +78,7 @@ These six fields together form a **Posting**. For example:
   NewIterator}` or `eof`.
 
 * `merge_index:lookup_sync(Pid, Index, Field, Term)` - Returns a list of
-  `{Value, Propreties}` records.
+  `{Value, Properties}` records.
   
 * `merge_index:range(Pid, Index, Field, StartTerm, EndTerm)` - Returns
   an iterator that will yield all of the `{Value, Properties}` records
@@ -95,7 +95,7 @@ These six fields together form a **Posting**. For example:
 * `merge_index:info(Pid, Index, Field, Term)` - Get an *estimate* of
   how many results exist for a given term. This is an estimate
   because, for performance reasons, the system does not factor
-  tombstones into the result. In addition, due to how bloom filtures
+  tombstones into the result. In addition, due to how bloom filters
   and signatures are used, results may be miscounted. This is mainly
   meant to be used as a way to optimize query planning, not for
   reliable counts.
@@ -164,7 +164,7 @@ At a high level, MergeIndex is a collection of one or more
 in-memory **buffers** storing recently written data, plus one or more
 immutable **segments** storing older data. As data is written, the
 buffers are converted to segments, and small segments are compacted
-together to form larger segments. Each buffer is backend by an
+together to form larger segments. Each buffer is backed by an
 append-only disk log, ensuring that the buffer state is recoverable if
 the system is shut down before the buffer is converted to a segment.
 
@@ -200,7 +200,7 @@ the form `{Index, Field, Term, Value, Props, Timestamp}`. As a speed
 optimization, we invert the timestamp (multiply by -1). This allows a
 simple ascending sort to put the latest timestamped value first
 (otherwise the earliest timestamped value would be first). Later,
-itererators across data used during querying and compacting take
+iterators across data used during querying and compacting take
 advantage of this information to filter out duplicates. Also, each
 posting is translated to `{{Index, Field, Term}, Value,
 InvertedTimestamp, Props}` which is the posting format that the buffer
@@ -268,7 +268,7 @@ followed by a 15-bit unsigned integer containing the size of the
 key on disk, followed by the `term_to_binary/N` representation of the key.
 
 A **value** is a `{Value, Timestamp, Props}` tuple. It is put in this
-order to optimize sorting and comparisions during later
+order to optimize sorting and comparisons during later
 operations. The list of values is compressed, and then stored as a
 single bit set to '0', followed by a 31-bit unsigned integer
 containing the size of the list of values on disk, followed by the
