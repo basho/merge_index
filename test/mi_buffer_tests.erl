@@ -3,6 +3,8 @@
                  g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
                  unique_latest/2, test_spec/2]).
 
+-ifdef(EQC).
+
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
@@ -90,3 +92,5 @@ prop_iter_range_test_() ->
 
 prop_info_test_() ->
     test_spec("/tmp/test/mi_buffer_info", fun prop_info_test/1).
+
+-endif.

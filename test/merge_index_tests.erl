@@ -2,6 +2,8 @@
 -compile(export_all).
 -import(common, [g_i/0, g_f/0, g_t/0, g_props/0, g_value/0]).
 
+-ifdef(EQC).
+
 -include_lib("eqc/include/eqc.hrl").
 -include_lib("eqc/include/eqc_statem.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -294,3 +296,5 @@ wait_for_it(Sink, Ref) ->
         {ok, ORef, _} ->
             ?debugFmt("Received data for older run: ~p~n", [ORef])
     end.
+
+-endif.
