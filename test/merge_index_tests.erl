@@ -113,7 +113,7 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     %% NOTE: The order in which fold returns postings is not
     %% deterministic.
 
-    %% Each member of V should be a memeber of Postings, they aren't
+    %% Each member of V should be a member of Postings, they aren't
     %% exactly equal b/c some of the dups might have been removed
     %% underneath -- this is confusing behavior if you ask me.
     V2 = lists:sort(V),
