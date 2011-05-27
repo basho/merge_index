@@ -107,7 +107,7 @@ iterator(Buffer) ->
 iterator(Index, Field, Term, Buffer) ->
     Table = Buffer#buffer.table,
     List1 = ets:lookup(Table, {Index, Field, Term}),
-    List2 = [{V,K,P} || {_Key,V,K,P} <- List1],
+    List2 = [{V,K, add_field_term(Field, Term, P)} || {_Key,V,K,P} <- List1],
     List3 = lists:sort(List2),
     fun() -> iterate_list(List3) end.
 
@@ -115,13 +115,7 @@ iterator(Index, Field, Term, Buffer) ->
 iterators(Index, Field, StartTerm, EndTerm, Size, Buffer) ->
     Table = Buffer#buffer.table,
     Keys = mi_utils:ets_keys(Table),
-    Filter = fun(Key) ->
-                     Key >= {Index, Field, StartTerm} 
-                         andalso 
-                         Key =< {Index, Field, EndTerm}
-                         andalso
-                         (Size == all orelse erlang:size(element(3, Key)) == Size)
-        end,
+    Filter = gen_filter(Index, Field, StartTerm, EndTerm, Size),
     MatchingKeys = lists:filter(Filter, Keys),
     [iterator(I,F,T, Buffer) || {I,F,T} <- MatchingKeys].
 
@@ -155,3 +149,37 @@ write_to_file(FH, Terms) when is_list(Terms) ->
 
 write_to_ets(Table, Postings) ->
     ets:insert(Table, Postings).
+
+add_field_term(Field, Term, Props) when is_list(Props) ->
+    [{Field, Term}|Props];
+add_field_term(_Field, _Term, Props) ->
+    Props.
+
+gen_filter(Index, Field, StartTerm, EndTerm, Size) ->
+    case EndTerm of
+        undefined ->
+            case Size of
+                all ->
+                    fun(Key) -> Key >= {Index, Field, StartTerm} end;
+                _ ->
+                    fun(Key) -> Key >= {Index, Field, StartTerm}
+                                    andalso
+                                    erlang:size(element(3, Key)) == Size
+                    end
+            end;
+        _ ->
+            case Size of
+                all ->
+                    fun(Key) -> Key >= {Index, Field, StartTerm}
+                                    andalso
+                                    Key =< {Index, Field, EndTerm}
+                    end;
+                _ ->
+                    fun(Key) -> Key >= {Index, Field, StartTerm}
+                                    andalso
+                                    Key =< {Index, Field, EndTerm}
+                                    andalso
+                                    erlang:size(element(3, Key)) == Size
+                    end
+            end
+    end.
