@@ -27,9 +27,13 @@
     code_change/3
 ]).
 
+-export([lookup/8,
+         range/10]).
+
 -record(state, { 
     root,
     locks,
+    %% TODO remove indexes, fields, terms -- not used
     indexes,
     fields,
     terms,
@@ -105,10 +109,6 @@ init([Root]) ->
         buffer_rollover_size=fuzzed_rollover_size()
     },
 
-    %% %% Do some profiling.
-    %% eprof:profile([self()]),
-
-    %% Return.
     {ok, State}.
 
 %% Return {Buffers, Segments}, after cleaning up/repairing any partially merged buffers.
@@ -284,19 +284,11 @@ handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
          end,
     NewLocks1 = lists:foldl(F2, NewLocks, Segments),
 
-    %% Spawn a streaming function...
-    StreamPid = spawn_link(fun() ->
-                       try
-                           lookup(Index, Field, Term, Filter, Pid, Ref,
-                                  Buffers, Segments)
-                       catch Type : Error ->
-                               ?PRINT({Type, Error, erlang:get_stacktrace()})
-                       after
-                           Pid ! {eof, Ref}
-                       end
-               end),
+    LPid = spawn_link(?MODULE, lookup,
+                      [Index, Field, Term, Filter, Pid, Ref,
+                       Buffers, Segments]),
 
-    NewPids = [ #stream_range{pid=StreamPid,
+    NewPids = [ #stream_range{pid=LPid,
                               caller=Pid,
                               ref=Ref,
                               buffers=Buffers,
@@ -321,13 +313,11 @@ handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
          end,
     NewLocks1 = lists:foldl(F2, NewLocks, Segments),
 
-    RangePid = spawn_link(fun() ->
-                       range(Index, Field, StartTerm, EndTerm, Size, Filter,
-                             Pid, Ref, Buffers, Segments),
-                       Pid ! {eof, Ref}
-               end),
+    RPid = spawn_link(?MODULE, range,
+                      [Index, Field, StartTerm, EndTerm, Size, Filter,
+                       Pid, Ref, Buffers, Segments]),
 
-    NewPids = [ #stream_range{pid=RangePid,
+    NewPids = [ #stream_range{pid=RPid,
                               caller=Pid,
                               ref=Ref,
                               buffers=Buffers,
@@ -524,12 +514,12 @@ handle_info({'EXIT', Pid, Reason},
 
             case Reason of
                 normal ->
-                    %% we've already sent the end-of-table message
-                    ok;
-                _Error ->
-                    %% send the end-of-table so the listener exits
-                    SR#stream_range.caller !
-                        {eof, SR#stream_range.ref}
+                    SR#stream_range.caller ! {eof, SR#stream_range.ref};
+                _ ->
+                    error_logger:error_msg("lookup/range failure: ~p~n",
+                                           [Reason]),
+                    SR#stream_range.caller
+                        ! {error, SR#stream_range.ref, Reason}
             end,
 
             %% Remove locks from all buffers...

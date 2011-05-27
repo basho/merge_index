@@ -40,7 +40,9 @@
                     Value::any(),
                     Props::[proplists:property()],
                     Timestamp::integer()}).
--type(iterator() :: fun(() -> {any(), iterator()} | eof)).
+-type(iterator() :: fun(() -> {any(), iterator()}
+                                  | eof
+                                  | {error, Reason::any()})).
 
 -define(LOOKUP_TIMEOUT, 60000).
 
@@ -86,7 +88,8 @@ lookup(Server, Index, Field, Term, Filter) ->
 %% `Server' - Pid of the server instance.
 %%
 %% `Filter' - Function used to filter the results.
--spec lookup_sync(pid(), index(), field(), mi_term(), function()) -> list().
+-spec lookup_sync(pid(), index(), field(), mi_term(), function()) ->
+                         list() | {error, Reason::any()}.
 lookup_sync(Server, Index, Field, Term, Filter) ->
     {ok, Ref} = mi_server:lookup(Server, Index, Field, Term, Filter),
     make_result_list(Ref).
@@ -121,7 +124,7 @@ range(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
 %%
 %% @see lookup_sync/5.
 -spec range_sync(pid(), index(), field(), mi_term(), mi_term(),
-                 size(), function()) -> list().
+                 size(), function()) -> list() | {error, Reason::any()}.
 range_sync(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
     {ok, Ref} = mi_server:range(Server, Index, Field, StartTerm, EndTerm,
                                 Size, Filter),
@@ -175,7 +178,9 @@ result_iterator(Ref) ->
         {results, Results, Ref} ->
             {Results, fun() -> result_iterator(Ref) end};
         {eof, Ref} ->
-            eof
+            eof;
+        {error, Ref, Reason} ->
+            {error, Reason}
     after
         ?LOOKUP_TIMEOUT ->
             throw(lookup_timeout)
@@ -191,7 +196,9 @@ make_result_list(Ref, Acc) ->
         {results, Results, Ref} ->
             make_result_list(Ref, [Results|Acc]);
         {eof, Ref} ->
-            lists:flatten(lists:reverse(Acc))
+            lists:flatten(lists:reverse(Acc));
+        {error, Ref, Reason} ->
+            {error, Reason}
     after
         ?LOOKUP_TIMEOUT ->
             throw(lookup_timeout)
