@@ -265,7 +265,8 @@ has the same `Index` as the previous key, and it is not the first key
 in a block, then the Index will be omitted from the tuple. Likewise
 with the `Field`. The key is stored as a single bit set to '1',
 followed by a 15-bit unsigned integer containing the size of the
-key on disk, followed by the `term_to_binary/N` representation of the key.
+key on disk, followed by the `term_to_binary/N` representation of the
+key. The maximum on-disk key size is 32k.
 
 A **value** is a `{Value, Timestamp, Props}` tuple. It is put in this
 order to optimize sorting and comparisons during later
@@ -276,7 +277,7 @@ containing the size of the list of values on disk, followed by the
 is larger than the `segment_values_compression_threshold`, then the
 values are compressed. If the list of values grows larger than the
 `segment_values_staging_size`, then it is broken up into multiple
-chunks.
+chunks. The maximum on-disk value size is theoretically 2GB.
 
 The **offsets table** is an ETS ordered_set table with an entry for
 each block in the **data file**. The entry is keyed on the *last* key
@@ -293,8 +294,10 @@ Each entry is a compressed tuple containing:
   lookup information allowing the system to skip directly to the
   proper read location during queries. Each entry is approximately 5 bytes,
   but could be up to 10 bytes for very large values.
-  * An edit signature, consisting of one bit that is '0' if the bytes
-    match, or '1' if the bytes don't match.
+  * An edit signature, constructed by comparing the current term
+    against the final term in the block. The edit signature is a
+    bitstring, where the bit is '0' if the bytes match, or '1' if the
+    bytes don't match.
   * A hash signature, which is a single byte representation of the
     bytes of the term xor'd and rotated.
   * The size of the key on disk.
@@ -331,8 +334,9 @@ beginning to the end of the file. The
 `segment_compact_read_ahead_size` setting determines how much of a
 file cache we use when reading the segment. For small segments, it
 might make sense to read the entire segment into memory, the
-`segment_full_read_size` setting determines this threshold. The
-individual iterators are grouped into a single master iterator.
+`segment_full_read_size` setting determines this threshold. In this
+case, `segment_compact_read_ahead_size` is unused. The individual
+iterators are grouped into a single master iterator.
 
 The `mi_segment_writer` module reads values from the master iterator,
 writing keys and values to the data file and offset information to the
@@ -347,7 +351,7 @@ into a segment.
 
 ## Locking (`mi_locks` module)
 
-MergeIndex uses a functional locking structure called to manage
+MergeIndex uses a functional locking structure to manage
 locks on buffers and segments. The locks are really a form of
 reference counting. During query time, the system opens iterators
 against all available buffers and segments. This increments a separate
@@ -364,6 +368,8 @@ query loads, we are guaranteed that the locks will eventually be
 released and the obsolete buffers or segments deleted.
 
 # Configuration Settings
+
+## Overview
 
 MergeIndex exposes a number of dials to tweak operations and RAM
 usage. 
@@ -389,6 +395,8 @@ involve in each compaction. In the worst case, a compaction could take
 The rest of the settings have a much smaller impact on performance and
 memory usage, and exist mainly for tweaking and special cases. 
 
+## Full List of Settings
+
 * `buffer_rollover_size` - The maximum size a buffer can reach before
   it is converted into a segment. Note that this is measured in terms
   of ETS table size, not the size the data will take on disk. Because
@@ -402,7 +410,7 @@ memory usage, and exist mainly for tweaking and special cases.
   compactions.
 * `buffer_delayed_write_size` - The number of bytes the buffer log can
   write before being synced to disk. The smaller this number, the
-  less chance of data corruption during a hard kill of the system,
+  less chance of data data loss during a hard kill of the system,
   with the tradeoff that touching disk is expensive. This is set to a
   high number (500k) by default, so the system mainly relies on the
   `buffer_delayed_write_ms` setting to ensure crash safety.
@@ -455,11 +463,13 @@ memory usage, and exist mainly for tweaking and special cases.
 * `segment_values_staging_size` - The number of values that
   `mi_segment_writer` should accumulate before writing values to a
   segment data file. Default is 1000.
-* `segment_values_compression_threshold` - The number of values that
-  must exist in a list before the system tries to compress it before
-  writing to a segment data file. Compression is a tradeoff between
-  time/CPU usage and space , so raising this value can reduce load on
-  the CPU at the cost of writing more data to disk. Default is 0.
+* `segment_values_compression_threshold` - Determines the point at
+  which the segment writer begins compressing the staging list. If the
+  list of values to write is greater than the threshold, then the data
+  is compressed before storing to disk. Compression is a tradeoff
+  between time/CPU usage and space , so raising this value can reduce
+  load on the CPU at the cost of writing more data to disk. Default is
+  0.
 * `segment_values_compression_level` - Determines the compression
   level to use when compressing data. Default is 1. Valid values are 1
   through 9.
