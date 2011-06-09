@@ -21,7 +21,7 @@ prop_api_test_() ->
 
 prop_api() ->
     application:load(merge_index),
-    ok = application:start(sasl),
+    application:start(sasl),
     %% Comment out following lines to see error reports...otherwise
     %% it's too much noise
     error_logger:delete_report_handler(sasl_report_tty_h),
