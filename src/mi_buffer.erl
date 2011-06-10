@@ -155,31 +155,45 @@ add_field_term(Field, Term, Props) when is_list(Props) ->
 add_field_term(_Field, _Term, Props) ->
     Props.
 
+
+%% @private
+%% @spec gen_filter(Index::binary(), Field::term(), StartTerm::term(), EndTerm::term(), Size::all|integer()) -> 
+%%           function().
+%%
+%% @doc Given and Index, Field, StartTerm, EndTerm, and Size, return a
+%%      filter function that returns true if the provided Key (of
+%%      format {Index, Field, Term}) is within the acceptable range.
 gen_filter(Index, Field, StartTerm, EndTerm, Size) ->
-    case EndTerm of
-        undefined ->
-            case Size of
-                all ->
-                    fun(Key) -> Key >= {Index, Field, StartTerm} end;
-                _ ->
-                    fun(Key) -> Key >= {Index, Field, StartTerm}
-                                    andalso
-                                    erlang:size(element(3, Key)) == Size
-                    end
-            end;
+    %% Construct a function to check start bounds...
+    StartFun = case StartTerm of
+                   undefined ->
+                       fun({KeyIndex, KeyField, _}) -> 
+                               {KeyIndex, KeyField} >= {Index, Field} 
+                       end;
+                   _ ->
+                       fun(Key) ->
+                               Key >= {Index, Field, StartTerm}
+                       end
+               end,
+
+    %% Construct a function to check end bounds...
+    EndFun = case EndTerm of
+                   undefined ->
+                       fun({KeyIndex, KeyField, _}) -> 
+                               {KeyIndex, KeyField} =< {Index, Field} 
+                       end;
+                   _ ->
+                       fun(Key) ->
+                               Key =< {Index, Field, EndTerm}
+                       end
+               end,
+
+    %% Possibly construct a function to check size. Return the final
+    %% filter function...
+    case Size of
+        all ->
+            fun(Key) -> StartFun(Key) andalso EndFun(Key) end;
         _ ->
-            case Size of
-                all ->
-                    fun(Key) -> Key >= {Index, Field, StartTerm}
-                                    andalso
-                                    Key =< {Index, Field, EndTerm}
-                    end;
-                _ ->
-                    fun(Key) -> Key >= {Index, Field, StartTerm}
-                                    andalso
-                                    Key =< {Index, Field, EndTerm}
-                                    andalso
-                                    erlang:size(element(3, Key)) == Size
-                    end
-            end
+            SizeFun = fun({_, _, KeyTerm}) -> erlang:size(KeyTerm) == Size end,
+            fun(Key) -> StartFun(Key) andalso EndFun(Key) andalso SizeFun(Key) end
     end.
