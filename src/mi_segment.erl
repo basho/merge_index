@@ -275,14 +275,14 @@ iterators(Index, Field, StartTerm, EndTerm, Size, Segment) ->
                  end,
 
     %% Find the Key containing the offset information we need
-    StartKey = {Index, Field, StartTerm},
+    StartKey = {Index, Field, StartTerm1},
     case get_offset_entry(StartKey, Segment) of
         {OffsetEntryKey, {BlockStart, _, _, _}} ->
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_query_read_ahead_size),
             {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
             file:position(FH, BlockStart),
             iterate_range_by_term(FH, OffsetEntryKey, Index, Field,
-                                  StartTerm, EndTerm, Size);
+                                  StartTerm1, EndTerm, Size);
         undefined ->
             [fun() -> eof end]
     end.
