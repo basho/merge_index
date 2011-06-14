@@ -18,6 +18,10 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+    %% Register our cluster_info app callback modules, with catch if
+    %% the app is missing or packaging is broken.
+    catch cluster_info:register_app(merge_index_cinfo),
+
     mi_sup:start_link().
 
 stop(_State) ->
