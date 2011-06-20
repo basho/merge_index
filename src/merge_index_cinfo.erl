@@ -24,19 +24,17 @@
          cluster_info_generator_funs/0
         ]).
 
-%% @spec () -> term()
 %% @doc Required callback function for cluster_info: initialization.
 %%
 %% This function doesn't have to do anything.
-
+-spec cluster_info_init() -> term().
 cluster_info_init() ->
     ok.
 
-%% @spec () -> list({string(), fun()})
 %% @doc Required callback function for cluster_info: return list of
 %%      {NameForReport, FunOfArity_1} tuples to generate ASCII/UTF-8
 %%      formatted reports.
-
+-spec cluster_info_generator_funs() -> list({string(), fun()}).
 cluster_info_generator_funs() ->
     [
      {"Merge Index Summary", fun summary/1}
