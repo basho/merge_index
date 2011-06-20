@@ -157,12 +157,13 @@ add_field_term(_Field, _Term, Props) ->
 
 
 %% @private
-%% @spec gen_filter(Index::binary(), Field::term(), StartTerm::term(), EndTerm::term(), Size::all|integer()) -> 
-%%           function().
-%%
 %% @doc Given and Index, Field, StartTerm, EndTerm, and Size, return a
 %%      filter function that returns true if the provided Key (of
 %%      format {Index, Field, Term}) is within the acceptable range.
+-spec gen_filter(merge_index:index(), merge_index:field(), 
+                 merge_index:mi_term(), merge_index:mi_term(), 
+                 merge_index:size()) -> 
+                        fun((merge_index:index(), merge_index:field(), merge_index:term()) -> boolean()).
 gen_filter(Index, Field, StartTerm, EndTerm, Size) ->
     %% Construct a function to check start bounds...
     StartFun = case StartTerm of
