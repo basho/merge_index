@@ -154,7 +154,8 @@ postcondition(#state{postings=Postings},
     L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
     L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
                    (I == Ii) andalso (F == Ff)
-                       andalso (ST =< Tt) andalso (ET >= Tt)],
+                             andalso (ST == undefined orelse ST =< Tt)
+                             andalso (ET == undefined orelse ET >= Tt)],
     %% TODO This is actually testing the wrong property b/c there is
     %% currently a bug in the range call that causes Props vals to be
     %% lost -- https://issues.basho.com/show_bug.cgi?id=1099 --
@@ -169,7 +170,8 @@ postcondition(#state{postings=Postings},
     L1 = lists:sort([{Ii,Ff,Tt,Vv,-1*TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings]),
     L2 = [{Vv,ignore} || {Ii,Ff,Tt,Vv,_,_} <- L1,
                    (I == Ii) andalso (F == Ff)
-                       andalso (ST =< Tt) andalso (ET >= Tt)],
+                             andalso (ST == undefined orelse ST =< Tt)
+                             andalso (ET == undefined orelse ET >= Tt)],
     %% TODO This is actually testing the wrong property b/c there is
     %% currently a bug in the range call that causes Props vals to be
     %% lost -- https://issues.basho.com/show_bug.cgi?id=1099 --
@@ -227,7 +229,14 @@ g_range_query(Postings) ->
             {g_i(), g_f(), g_t(), g_t()};
         Len ->
             {I,F,ST,_,_,_} = lists:nth(random:uniform(Len), Postings),
-            {I, F, ST, g_t()}
+            IFPostings = lists:filter(match(I,F), Postings),
+            Len2 = length(IFPostings),
+            {I,F,ET,_,_,_} = lists:nth(random:uniform(Len2), IFPostings),
+            {ST1, ET1} = if ET < ST -> {ET, ST};
+                            true -> {ST, ET}
+                         end,
+            elements([{I,F,ST1,ET1}, {I,F,ST1,undefined}, {I,F,undefined,ET1},
+                      {I,F,undefined,undefined}])
     end.
 
 %% ====================================================================
@@ -316,5 +325,11 @@ iterate(eof, Acc) ->
     lists:flatten(lists:reverse(Acc));
 iterate({Res, Itr}, Acc) ->
     iterate(Itr(), [Res|Acc]).
+
+
+match(I, F) ->
+    fun({Ii,Ff,_,_,_,_}) ->
+            Ii == I andalso Ff == F
+    end.
 
 -endif.
