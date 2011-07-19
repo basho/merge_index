@@ -65,9 +65,6 @@ These six fields together form a **Posting**. For example:
   enforced by the software. You should only have one Pid per
   directory, otherwise your data will be corrupted.
   
-* `merge_index:index(Pid, Index, Field, Term, Value, Properties,
-  Timestamp)` - Index a posting.
-  
 * `merge_index:index(Pid, Postings)` - Index a list of postings.
 
 * `merge_index:lookup(Pid, Index, Field, Term)` - Returns an iterator
@@ -89,8 +86,7 @@ These six fields together form a **Posting**. For example:
 
 * `merge_index:range_sync(Pid, Index, Field, StartTerm, EndTerm)` -
   Returns a list of the `{Value, Properties}` records matching the
-  provided range, inclusive. The iterator should be consumed quickly,
-  as the results are stored in the Erlang mailbox of the calling Pid.
+  provided range, inclusive.
 
 * `merge_index:info(Pid, Index, Field, Term)` - Get an *estimate* of
   how many results exist for a given term. This is an estimate
