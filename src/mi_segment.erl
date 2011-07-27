@@ -31,6 +31,12 @@
 -define(BLOOM_CAPACITY, 512).
 -define(BLOOM_ERROR, 0.01).
 
+
+%% MIN_VALUE is used during range searches. Numbers sort the smallest
+%% in Erlang (http://www.erlang.org/doc/reference_manual/expressions.html), 
+%% so this is just a very small number.
+-define(MIN_VALUE, -9223372036854775808). %% -1 * (2^63)).
+
 exists(Root) ->
     filelib:is_file(data_file(Root)).
 
@@ -260,15 +266,23 @@ iterate_by_term_values_1([], File, TransformFun, WhenDoneFun) ->
 %% iterators/5 - Return a list of iterators for all the terms in a
 %% given range.
 iterators(Index, Field, StartTerm, EndTerm, Size, Segment) ->
-    %% Find the Key containing the offset information we need.
-    StartKey = {Index, Field, StartTerm},
+    %% If the user has passed in 'undefined' for the StartTerm, then
+    %% replace with ?MIN_VALUE, signaling that we don't want a lower
+    %% bound. An EndTerm of 'undefined' is handled within iterate_range_by_term/7.
+    StartTerm1 = case StartTerm == undefined of
+                     true  -> ?MIN_VALUE;
+                     false -> StartTerm
+                 end,
+
+    %% Find the Key containing the offset information we need
+    StartKey = {Index, Field, StartTerm1},
     case get_offset_entry(StartKey, Segment) of
         {OffsetEntryKey, {BlockStart, _, _, _}} ->
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_query_read_ahead_size),
             {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
             file:position(FH, BlockStart),
             iterate_range_by_term(FH, OffsetEntryKey, Index, Field,
-                                  StartTerm, EndTerm, Size);
+                                  StartTerm1, EndTerm, Size);
         undefined ->
             [fun() -> eof end]
     end.
