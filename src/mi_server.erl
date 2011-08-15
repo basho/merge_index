@@ -145,7 +145,8 @@ read_buf_and_seg(Root) ->
     %% Get buffer files, calculate the next_id, load the buffers, turn
     %% any extraneous buffers into segments...
     BufferFiles = filelib:wildcard(join(Root, "buffer.*")),
-    BufferFiles1 = lists:sort([{get_id_number(X), X} || X <- BufferFiles]),
+    BufferFiles1 = lists:sort([{get_id_number(filename:basename(X)), X}
+                               || X <- BufferFiles]),
     NextID = lists:max([X || {X, _} <- BufferFiles1] ++ [0]) + 1,
     {NextID1, Buffer, Segments1} = read_buffers(Root, BufferFiles1, NextID, Segments),
     
