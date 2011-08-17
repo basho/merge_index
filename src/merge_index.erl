@@ -1,16 +1,33 @@
 %% -------------------------------------------------------------------
 %%
-%% @doc The merge_index applicaiton is an index from Index/Field/Term
+%% merge_index: main interface to merge_index library.
+%%
+%% Copyright (c) 2007-2011 Basho Technologies, Inc.  All Rights Reserved.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+
+%% @doc The merge_index application is an index from Index/Field/Term
 %% (IFT) tuples to Values.  The values are document IDs or some form
 %% of identification for the object which contains the IFT.
 %% Futhermore, each IFT/Value pair has an associated proplists (Props)
 %% and timestamp (Timestamp) which are used to describe where the IFT
 %% was found in the Value and at what time the entry was written,
 %% respectively.
-%%
-%% Copyright (c) 2007-2011 Basho Technologies, Inc. All Rights Reserved.
-%% @end
-%% -------------------------------------------------------------------
+
 -module(merge_index).
 -author("Rusty Klophaus <rusty@basho.com>").
 -include("merge_index.hrl").
