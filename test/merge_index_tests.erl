@@ -265,7 +265,7 @@ g_range_query(Postings) ->
 
 init([BRS,BDWS,BDWM,MCS,SQRAS,SCRAS,SFBSandSDWS,SDWM,SFRS,SBS,
       SVSS,SVCT,SVCL]) ->
-    Root = "/tmp/test/prop_api",
+    Root = "/tmp/test.test-test/prop_api",
     os:cmd(?FMT("rm -rf ~s; mkdir -p ~s", [Root, Root])),
     set(buffer_rollover_size, BRS),
     set(buffer_delayed_write_size, BDWS),
