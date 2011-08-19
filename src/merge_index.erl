@@ -65,24 +65,20 @@
 
 %% @doc Start a new merge_index server.
 -spec start_link(string()) -> {ok, Pid::pid()} | ignore | {error, Error::any()}.
-start_link(Root) ->
-    gen_server:start_link(mi_server, [Root], [{timeout, infinity}]).
+start_link(Root) -> mi_server:start_link(Root).
 
 %% @doc Stop the merge_index server.
 -spec stop(pid()) -> ok.
-stop(ServerPid) ->
-    mi_server:stop(ServerPid).
+stop(Server) -> mi_server:stop(Server).
 
 %% @doc Index `Postings'.
 -spec index(pid(), [posting()]) -> ok.
-index(ServerPid, Postings) ->
-    gen_server:call(ServerPid, {index, Postings}, infinity).
+index(Server, Postings) -> mi_server:index(Server, Postings).
 
 %% @doc Return a `Weight' for the given IFT.
 -spec info(pid(), index(), field(), mi_term()) ->
                   {ok, [{Term::any(), Weight::integer()}]}.
-info(ServerPid, Index, Field, Term) ->
-    gen_server:call(ServerPid, {info, Index, Field, Term}, infinity).
+info(Server, Index, Field, Term) -> mi_server:info(Server, Index, Field, Term).
 
 %% @doc Lookup the results for IFT and return an iterator.  This
 %% allows the caller to process data as it comes in/wants it.
@@ -149,8 +145,7 @@ range_sync(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
 
 %% @doc Predicate to determine if the buffers AND segments are empty.
 -spec is_empty(pid()) -> boolean().
-is_empty(ServerPid) ->
-    gen_server:call(ServerPid, is_empty, infinity).
+is_empty(Server) -> mi_server:is_empty(Server).
 
 %% @doc Fold over all IFTs in the index.
 %%
@@ -162,13 +157,11 @@ is_empty(ServerPid) ->
 %%
 %% `Acc2' - The final accumulator.
 -spec fold(pid(), function(), any()) -> {ok, Acc2::any()}.
-fold(ServerPid, Fun, Acc) ->
-    gen_server:call(ServerPid, {fold, Fun, Acc}, infinity).
+fold(Server, Fun, Acc) -> mi_server:fold(Server, Fun, Acc).
 
 %% @doc Drop all current state and start from scratch.
 -spec drop(pid()) -> ok.
-drop(ServerPid) ->
-    gen_server:call(ServerPid, drop, infinity).
+drop(Server) -> mi_server:drop(Server).
 
 %% @doc Perform compaction of segments if needed.
 %%
@@ -178,8 +171,7 @@ drop(ServerPid) ->
 -spec compact(pid()) ->
                      {ok, Segs::integer(), Bytes::integer()}
                          | {error, Reason::any()}.
-compact(ServerPid) ->
-    gen_server:call(ServerPid, start_compaction, infinity).
+compact(Server) -> mi_server:compact(Server).
 
 %%%===================================================================
 %%% Internal Functions
