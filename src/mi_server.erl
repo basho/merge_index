@@ -25,14 +25,21 @@
 -include("merge_index.hrl").
 
 -export([
+    buffer_to_segment/3,
+    compact/1,
+    drop/1,
+    fold/3,
     get_id_number/1,
     has_deleteme_flag/1,
-    set_deleteme_flag/1,
-    register_buffer_converter/2,
-    buffer_to_segment/3,
-    stop/1,
+    index/2,
+    info/4,
+    is_empty/1,
     lookup/5,
     range/7,
+    register_buffer_converter/2,
+    set_deleteme_flag/1,
+    start_link/1,
+    stop/1,
     %% GEN SERVER
     init/1,
     handle_call/3,
@@ -48,10 +55,6 @@
 -record(state, { 
     root,
     locks,
-    %% TODO remove indexes, fields, terms -- not used
-    indexes,
-    fields,
-    terms,
     segments,
     buffers,
     next_id,
@@ -72,11 +75,58 @@
 -define(RESULTVEC_SIZE, 1000).
 -define(DELETEME_FLAG, ".deleted").
 
-register_buffer_converter(ServerPid, ConverterPid) ->
-    gen_server:cast(ServerPid, {register_buffer_converter, ConverterPid}).
+%%%===================================================================
+%%% API
+%%%===================================================================
 
-buffer_to_segment(ServerPid, Buffer, SegmentWO) ->
-    gen_server:cast(ServerPid, {buffer_to_segment, Buffer, SegmentWO}).
+buffer_to_segment(Server, Buffer, SegmentWO) ->
+    gen_server:cast(Server, {buffer_to_segment, Buffer, SegmentWO}).
+
+compact(Server) -> gen_server:call(Server, start_compaction, infinity).
+
+drop(Server) -> gen_server:call(Server, drop, infinity).
+
+has_deleteme_flag(Filename) -> filelib:is_file(Filename ++ ?DELETEME_FLAG).
+
+index(Server, Postings) -> gen_server:call(Server, {index, Postings}, infinity).
+
+info(Server, Index, Field, Term) ->
+    gen_server:call(Server, {info, Index, Field, Term}, infinity).
+
+is_empty(Server) -> gen_server:call(Server, is_empty, infinity).
+
+fold(Server, Fun, Acc) -> gen_server:call(Server, {fold, Fun, Acc}, infinity).
+
+%% Return the ID number of a Segment/Buffer/Filename...
+%% Files can be named:
+%%   - buffer.N
+%%   - segment.N
+%%   - segment.N.data
+%%   - segment.M-N
+%%   - segment.M-N.data
+get_id_number(Segment) when element(1, Segment) == segment ->
+    Filename = mi_segment:filename(Segment),
+    get_id_number(Filename);
+get_id_number(Buffer) when element(1, Buffer) == buffer ->
+    Filename = mi_buffer:filename(Buffer),
+    get_id_number(Filename);
+get_id_number(Filename) ->
+    case string:chr(Filename, $-) == 0 of
+        true ->
+            %% Handle buffer.N, segment.N, segment.N.data
+            case string:tokens(Filename, ".") of
+                [_, N]    -> ok;
+                [_, N, _] -> ok
+            end,
+            list_to_integer(N);
+        false ->
+            %% Handle segment.M-N, segment.M-N.data
+            case string:tokens(Filename, ".-") of
+                [_, M, N]    -> ok;
+                [_, M, N, _] -> ok
+            end,
+            [list_to_integer(M), list_to_integer(N)]
+    end.
 
 lookup(Server, Index, Field, Term, Filter) ->
     Ref = make_ref(),
@@ -93,8 +143,22 @@ range(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
                          infinity),
     {ok, Ref}.
 
-stop(Pid) ->
-    gen_server:call(Pid, stop).
+register_buffer_converter(Server, ConverterPid) ->
+    gen_server:cast(Server, {register_buffer_converter, ConverterPid}).
+
+set_deleteme_flag(Filename) ->
+    file:write_file(Filename ++ ?DELETEME_FLAG, "").
+
+start_link(Root) ->
+    gen_server:start_link(mi_server, [Root], [{timeout, infinity}]).
+
+stop(Server) ->
+    gen_server:call(Server, stop).
+
+
+%%%===================================================================
+%%% Callbacks
+%%%===================================================================
 
 init([Root]) ->
     %% Seed the random generator...
@@ -125,65 +189,6 @@ init([Root]) ->
     },
 
     {ok, State}.
-
-%% Return {Buffers, Segments}, after cleaning up/repairing any partially merged buffers.
-read_buf_and_seg(Root) ->
-    %% Delete any files that have a ?DELETEME_FLAG flag. This means that
-    %% the system stopped before proper cleanup.
-    F1 = fun(Filename) ->
-        Basename = filename:basename(Filename, ?DELETEME_FLAG),
-        Basename1 = filename:join(Root, Basename ++ ".*"),
-        [ok = file:delete(X) || X <- filelib:wildcard(Basename1)]
-    end,
-    [F1(X) || X <- filelib:wildcard(join(Root, "*.deleted"))],
-
-    %% Open the segments...
-    SegmentFiles = filelib:wildcard(join(Root, "segment.*.data")),
-    SegmentFiles1 = [filename:join(Root, filename:basename(X, ".data")) || X <- SegmentFiles],
-    Segments = read_segments(SegmentFiles1, []),
-
-    %% Get buffer files, calculate the next_id, load the buffers, turn
-    %% any extraneous buffers into segments...
-    BufferFiles = filelib:wildcard(join(Root, "buffer.*")),
-    BufferFiles1 = lists:sort([{get_id_number(filename:basename(X)), X}
-                               || X <- BufferFiles]),
-    NextID = lists:max([X || {X, _} <- BufferFiles1] ++ [0]) + 1,
-    {NextID1, Buffer, Segments1} = read_buffers(Root, BufferFiles1, NextID, Segments),
-    
-    %% Return...
-    {NextID1, Buffer, Segments1}.
-
-read_segments([], _Segments) -> [];
-read_segments([SName|Rest], Segments) ->
-    %% Read the segment from disk...
-    Segment = mi_segment:open_read(SName),
-    [Segment|read_segments(Rest, Segments)].
-
-read_buffers(Root, [], NextID, Segments) ->
-    %% No latest buffer exists, open a new one...
-    BName = join(Root, "buffer." ++ integer_to_list(NextID)),
-    Buffer = mi_buffer:new(BName),
-    {NextID + 1, Buffer, Segments};
-
-read_buffers(_Root, [{_BNum, BName}], NextID, Segments) ->
-    %% This is the final buffer file... return it as the open buffer...
-    Buffer = mi_buffer:new(BName),
-    {NextID, Buffer, Segments};
-
-read_buffers(Root, [{BNum, BName}|Rest], NextID, Segments) ->
-    %% Multiple buffers exist... convert them into segments...
-    SName = join(Root, "segment." ++ integer_to_list(BNum)),
-    set_deleteme_flag(SName),
-    Buffer = mi_buffer:new(BName),
-    mi_buffer:close_filehandle(Buffer),
-    SegmentWO = mi_segment:open_write(SName),
-    mi_segment:from_buffer(Buffer, SegmentWO),
-    mi_buffer:delete(Buffer),
-    clear_deleteme_flag(mi_segment:filename(SegmentWO)),
-    SegmentRO = mi_segment:open_read(SName),
-    
-    %% Loop...
-    read_buffers(Root, Rest, NextID, [SegmentRO|Segments]).
 
 
 handle_call({index, Postings}, _From, State) ->
@@ -357,14 +362,14 @@ handle_call({fold, FoldFun, Acc}, _From, State) ->
     %% Fold through all the buffers...
     F1 = fun(Buffer, AccIn) -> 
                  Iterator = mi_buffer:iterator(Buffer),
-                 fold(WrappedFun, AccIn, Iterator())
+                 fold_itr(WrappedFun, AccIn, Iterator())
          end,
     Acc1 = lists:foldl(F1, Acc, Buffers),
 
     %% Fold through all the segments...
     F2 = fun(Segment, AccIn) -> 
                  Iterator = mi_segment:iterator(Segment),
-                 fold(WrappedFun, AccIn, Iterator())
+                 fold_itr(WrappedFun, AccIn, Iterator())
          end,
     Acc2 = lists:foldl(F2, Acc1, Segments),
 
@@ -569,6 +574,70 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+
+%%%===================================================================
+%%% Internal
+%%%===================================================================
+
+%% Return {Buffers, Segments}, after cleaning up/repairing any partially merged buffers.
+read_buf_and_seg(Root) ->
+    %% Delete any files that have a ?DELETEME_FLAG flag. This means that
+    %% the system stopped before proper cleanup.
+    F1 = fun(Filename) ->
+        Basename = filename:basename(Filename, ?DELETEME_FLAG),
+        Basename1 = filename:join(Root, Basename ++ ".*"),
+        [ok = file:delete(X) || X <- filelib:wildcard(Basename1)]
+    end,
+    [F1(X) || X <- filelib:wildcard(join(Root, "*.deleted"))],
+
+    %% Open the segments...
+    SegmentFiles = filelib:wildcard(join(Root, "segment.*.data")),
+    SegmentFiles1 = [filename:join(Root, filename:basename(X, ".data")) || X <- SegmentFiles],
+    Segments = read_segments(SegmentFiles1, []),
+
+    %% Get buffer files, calculate the next_id, load the buffers, turn
+    %% any extraneous buffers into segments...
+    BufferFiles = filelib:wildcard(join(Root, "buffer.*")),
+    BufferFiles1 = lists:sort([{get_id_number(filename:basename(X)), X}
+                               || X <- BufferFiles]),
+    NextID = lists:max([X || {X, _} <- BufferFiles1] ++ [0]) + 1,
+    {NextID1, Buffer, Segments1} = read_buffers(Root, BufferFiles1, NextID, Segments),
+
+    %% Return...
+    {NextID1, Buffer, Segments1}.
+
+read_segments([], _Segments) -> [];
+read_segments([SName|Rest], Segments) ->
+    %% Read the segment from disk...
+    Segment = mi_segment:open_read(SName),
+    [Segment|read_segments(Rest, Segments)].
+
+read_buffers(Root, [], NextID, Segments) ->
+    %% No latest buffer exists, open a new one...
+    BName = join(Root, "buffer." ++ integer_to_list(NextID)),
+    Buffer = mi_buffer:new(BName),
+    {NextID + 1, Buffer, Segments};
+
+read_buffers(_Root, [{_BNum, BName}], NextID, Segments) ->
+    %% This is the final buffer file... return it as the open buffer...
+    Buffer = mi_buffer:new(BName),
+    {NextID, Buffer, Segments};
+
+read_buffers(Root, [{BNum, BName}|Rest], NextID, Segments) ->
+    %% Multiple buffers exist... convert them into segments...
+    SName = join(Root, "segment." ++ integer_to_list(BNum)),
+    set_deleteme_flag(SName),
+    Buffer = mi_buffer:new(BName),
+    mi_buffer:close_filehandle(Buffer),
+    SegmentWO = mi_segment:open_write(SName),
+    mi_segment:from_buffer(Buffer, SegmentWO),
+    mi_buffer:delete(Buffer),
+    clear_deleteme_flag(mi_segment:filename(SegmentWO)),
+    SegmentRO = mi_segment:open_read(SName),
+
+    %% Loop...
+    read_buffers(Root, Rest, NextID, [SegmentRO|Segments]).
+
 %% Merge-sort the results from Iterators, and stream to the pid.
 lookup(Index, Field, Term, Filter, Pid, Ref, Buffers, Segments) ->
     BufferIterators = [mi_buffer:iterator(Index, Field, Term, X) || X <- Buffers],
@@ -640,45 +709,8 @@ group_iterator(eof, Iterator) ->
 group_iterator(Iterator, eof) -> 
     Iterator.
 
-%% Return the ID number of a Segment/Buffer/Filename...
-%% Files can be named:
-%%   - buffer.N
-%%   - segment.N
-%%   - segment.N.data
-%%   - segment.M-N
-%%   - segment.M-N.data
-get_id_number(Segment) when element(1, Segment) == segment ->
-    Filename = mi_segment:filename(Segment),
-    get_id_number(Filename);
-get_id_number(Buffer) when element(1, Buffer) == buffer ->
-    Filename = mi_buffer:filename(Buffer),
-    get_id_number(Filename);
-get_id_number(Filename) ->
-    case string:chr(Filename, $-) == 0 of
-        true ->
-            %% Handle buffer.N, segment.N, segment.N.data
-            case string:tokens(Filename, ".") of
-                [_, N]    -> ok;
-                [_, N, _] -> ok
-            end,
-            list_to_integer(N);
-        false ->
-            %% Handle segment.M-N, segment.M-N.data
-            case string:tokens(Filename, ".-") of
-                [_, M, N]    -> ok;
-                [_, M, N, _] -> ok
-            end,
-            [list_to_integer(M), list_to_integer(N)]
-    end.
-
-set_deleteme_flag(Filename) ->
-    file:write_file(Filename ++ ?DELETEME_FLAG, "").
-
 clear_deleteme_flag(Filename) ->
     file:delete(Filename ++ ?DELETEME_FLAG).
-
-has_deleteme_flag(Filename) ->
-    filelib:is_file(Filename ++ ?DELETEME_FLAG).
 
 %% Figure out which files to merge. Take the average of file sizes,
 %% return anything smaller than the average for merging.
@@ -696,10 +728,9 @@ get_segments_to_merge(Segments) ->
     %% Return segments less than average...
     [Segment || {Size, Segment} <- SortedSizedSegments, Size < Avg].
 
-fold(_Fun, Acc, eof) -> 
-    Acc;
-fold(Fun, Acc, {Term, IteratorFun}) ->
-    fold(Fun, Fun(Term, Acc), IteratorFun()).
+fold_itr(_Fun, Acc, eof) -> Acc;
+fold_itr(Fun, Acc, {Term, IteratorFun}) ->
+    fold_itr(Fun, Fun(Term, Acc), IteratorFun()).
 
 join(#state { root=Root }, Name) ->
     join(Root, Name);
