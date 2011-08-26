@@ -17,32 +17,21 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-
--module(mi_sup).
+-module(mi_buffer_converter_sup).
 -behaviour(supervisor).
 
-%% API
--export([start_link/0]).
+-export([init/1,
+         start_link/0,
+         start_child/3]).
 
-%% Supervisor callbacks
--export([init/1]).
-
-%% Helper macro for declaring children of supervisor
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
-
-%% ===================================================================
-%% API functions
-%% ===================================================================
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-
-%% ===================================================================
-%% Supervisor callbacks
-%% ===================================================================
+start_child(Server, Root, Buffer) ->
+    supervisor:start_child(mi_buffer_converter_sup, [Server, Root, Buffer]).
 
 init([]) ->
-    Scheduler = ?CHILD(mi_scheduler, worker),
-    Converter = ?CHILD(mi_buffer_converter_sup, supervisor),
-
-    {ok, {{one_for_one, 5, 10}, [Converter, Scheduler]}}.
+    Spec = {undefined,
+            {mi_buffer_converter, start_link, []},
+            temporary, 1000, worker, [mi_buffer_converter]},
+    {ok, {{simple_one_for_one, 10, 1}, [Spec]}}.
