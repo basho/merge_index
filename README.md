@@ -112,17 +112,18 @@ performs a lookup and range query.
     %% Open a merge_index database.
     application:start(merge_index),
     {ok, Pid} = merge_index:start_link("./merge_index_data"),
+    Filter = fun(_,_) -> true end,
      
     %% Index a posting...
-    merge_index:index(Pid, "index", "field", "term", "value1", [], 1),
+    merge_index:index(Pid, [{"index", "field", "term", "value1", [], 1}]),
      
     %% Run a query, get results back as a list...
-    List1 = merge_index:lookup_sync(Pid, "index", "field", "term"),
+    List1 = merge_index:lookup_sync(Pid, "index", "field", "term", Filter),
     io:format("lookup_sync1:~n~p~n", [List1]),
      
     %% Run a query, get results back as an iterator. 
     %% Iterator returns {Result, NewIterator} or 'eof'.
-    Iterator1 = merge_index:lookup(Pid, "index", "field", "term"),
+    Iterator1 = merge_index:lookup(Pid, "index", "field", "term", Filter),
     {Result1, Iterator2} = Iterator1(),
     eof = Iterator2(),
     io:format("lookup:~n~p~n", [Result1]),
@@ -135,7 +136,7 @@ performs a lookup and range query.
     ]),
      
     %% Run another query...
-    List2 = merge_index:lookup_sync(Pid, "index", "field", "term"),
+    List2 = merge_index:lookup_sync(Pid, "index", "field", "term", Filter),
     io:format("lookup_sync2:~n~p~n", [List2]),
      
     %% Delete some postings...
@@ -145,7 +146,7 @@ performs a lookup and range query.
     ]),
      
     %% Run another query...
-    List3 = merge_index:lookup_sync(Pid, "index", "field", "term"),
+    List3 = merge_index:lookup_sync(Pid, "index", "field", "term", Filter),
     io:format("lookup_sync2:~n~p~n", [List3]),
      
     %% Delete the database.
