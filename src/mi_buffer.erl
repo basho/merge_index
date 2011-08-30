@@ -146,13 +146,23 @@ iterate_list([H|T]) ->
 %% ===================================================================
 
 read_value(FH) ->
+    {ok, CurrPos} = file:position(FH, cur),
     case file:read(FH, 4) of
-        {ok, <<Size:32/unsigned-integer>>} ->
-            {ok, B} = file:read(FH, Size),
-            {ok, binary_to_term(B)};
+        {ok, <<Size:32/unsigned-integer>>} when Size > 0->
+            case file:read(FH, Size) of
+                {ok, <<B:Size/binary>>} ->
+                    {ok, binary_to_term(B)};
+                _ ->
+                    file:position(FH, {bof, CurrPos}),
+                    eof
+            end;
+        {ok, _Binary}  ->
+            file:position(FH, {bof, CurrPos}),
+            eof;
         eof ->
             eof
     end.
+
 
 write_to_file(FH, Terms) when is_list(Terms) ->
     %% Convert all values to binaries, count the bytes.
