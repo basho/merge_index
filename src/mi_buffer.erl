@@ -166,7 +166,7 @@ read_value(FH, Filename) ->
     end.
 
 log_truncation(Filename, Position) ->
-    error_logger:info_msg("Corrupted posting detected in ~s after reading ~w bytes, ignoring remainder.",
+    error_logger:warning_msg("Corrupted posting detected in ~s after reading ~w bytes, ignoring remainder.",
                           [Filename, Position]).
 
 write_to_file(FH, Terms) when is_list(Terms) ->
