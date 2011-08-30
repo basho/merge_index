@@ -140,9 +140,9 @@ handle_cast({convert, Root, Buffer}, #state{mi_root=Root}=State) ->
         {noreply, State}
     catch
         error:badarg ->
-            error_logger:warning_msg("`convert` attempted to work with a"
-                                     " nonexistent buffer, probably because"
-                                     " drop was called~n"),
+            lager:warning("`convert` attempted to work with a"
+                          " nonexistent buffer, probably because"
+                          " drop was called"),
             {noreply, State}
     end;
 handle_cast(_Msg, State) ->
