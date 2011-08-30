@@ -160,7 +160,7 @@ performs a lookup and range query.
 At a high level, MergeIndex is a collection of one or more
 in-memory **buffers** storing recently written data, plus one or more
 immutable **segments** storing older data. As data is written, the
-buffers are converted to segments, and small segments are compacted
+buffers are converted to segments, and small segments are compacted
 together to form larger segments. Each buffer is backed by an
 append-only disk log, ensuring that the buffer state is recoverable if
 the system is shut down before the buffer is converted to a segment.
