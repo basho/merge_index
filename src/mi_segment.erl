@@ -66,6 +66,7 @@ open_read(Root) ->
             {ok, FileInfo} = file:read_file_info(data_file(Root)),
 
             OffsetsTable = read_offsets(Root),
+            lager:info("opened segment '~s' for read", [Root]),
             #segment {
                        root=Root,
                        offsets_table=OffsetsTable,
@@ -86,6 +87,7 @@ open_write(Root) ->
             %% TODO: Do we really need to go through the trouble of writing empty files here?
             file:write_file(data_file(Root), <<"">>),
             file:write_file(offsets_file(Root), <<"">>),
+            lager:info("opened segment '~s' for write", [Root]),
             #segment {
                        root = Root,     
                        offsets_table = ets:new(segment_offsets, [ordered_set, public])

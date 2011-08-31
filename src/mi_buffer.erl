@@ -60,6 +60,7 @@ new(Filename) ->
     open_inner(FH, Table),
     {ok, Size} = file:position(FH, cur),
 
+    lager:info("opened buffer '~s'", [Filename]),
     %% Return the buffer.
     #buffer { filename=Filename, handle=FH, table=Table, size=Size }.
 
@@ -75,11 +76,12 @@ open_inner(FH, Table) ->
 filename(Buffer) ->
     Buffer#buffer.filename.
 
-delete(Buffer) ->
-    ets:delete(Buffer#buffer.table),
+delete(Buffer=#buffer{table=Table, filename=Filename}) ->
+    ets:delete(Table),
     close_filehandle(Buffer),
-    file:delete(Buffer#buffer.filename),
-    file:delete(Buffer#buffer.filename ++ ".deleted"),
+    file:delete(Filename),
+    file:delete(Filename ++ ".deleted"),
+    lager:info("deleted buffer '~s'", [Filename]),
     ok.
 
 close_filehandle(Buffer) ->
