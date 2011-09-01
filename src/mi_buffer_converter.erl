@@ -78,9 +78,9 @@ handle_info(timeout, #state{server=Server, root=Root, buffer=Buffer}=State) ->
         {stop, normal, State}
     catch
         error:badarg ->
-            error_logger:warning_msg("`convert` attempted to work with a"
-                                     " nonexistent buffer, probably because"
-                                     " drop was called~n"),
+            lager:warning("`convert` attempted to work with a"
+                          " nonexistent buffer, probably because"
+                          " drop was called"),
             {stop, buffer_dropped, State}
     end.
 

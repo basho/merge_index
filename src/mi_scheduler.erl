@@ -98,7 +98,7 @@ handle_info({worker_ready, WorkerPid}, #state { queue = Q } = State) ->
             {noreply, NewState}
     end;
 handle_info({'EXIT', WorkerPid, Reason}, #state { worker = WorkerPid } = State) ->
-    error_logger:error_msg("Compaction worker ~p exited: ~p\n", [WorkerPid, Reason]),
+    lager:error("Compaction worker ~p exited: ~p", [WorkerPid, Reason]),
     %% Start a new worker.
     Self=self(),
     NewWorkerPid = spawn_link(fun() -> worker_loop(Self) end),
@@ -130,16 +130,15 @@ worker_loop(Parent) ->
                 {ok, OldSegments, OldBytes} ->
                     case ElapsedSecs > 1 of
                         true ->
-                            error_logger:info_msg(
-                              "Pid ~p compacted ~p segments for ~p bytes in ~p seconds, ~.2f MB/sec\n",
+                            lager:info(
+                              "Pid ~p compacted ~p segments for ~p bytes in ~p seconds, ~.2f MB/sec",
                               [Pid, OldSegments, OldBytes, ElapsedSecs, OldBytes/ElapsedSecs/(1024*1024)]);
                         false ->
                             ok
                     end;
 
                 {Error, Reason} when Error == error; Error == 'EXIT' ->
-                    error_logger:error_msg("Failed to compact ~p: ~p\n",
-                                           [Pid, Reason])
+                    lager:error("Failed to compact ~p: ~p", [Pid, Reason])
             end,
             ?MODULE:worker_loop(Parent);
         _ ->

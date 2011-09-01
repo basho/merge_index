@@ -158,6 +158,7 @@ stop(Server) ->
 %%%===================================================================
 
 init([Root]) ->
+    lager:info("loading merge_index '~s'", [Root]),
     %% Seed the random generator...
     random:seed(now()),
     
@@ -182,6 +183,8 @@ init([Root]) ->
         to_convert = queue:new()
     },
 
+    lager:info("finished loading merge_index '~s' with rollover size ~p",
+               [Root, State#state.buffer_rollover_size]),
     {ok, State}.
 
 handle_call({index, Postings}, _From, State) ->
@@ -502,9 +505,9 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
             end,
             {noreply, NewState};
         false ->
-            error_logger:warning_msg("`buffer_to_segment` cast received"
-                                     " for nonexistent buffer, probably"
-                                     " because drop was called~n"),
+            lager:warning("`buffer_to_segment` cast received"
+                          " for nonexistent buffer, probably"
+                          " because drop was called"),
             {noreply, State}
     end;
 
@@ -557,8 +560,7 @@ handle_info({'EXIT', Pid, Reason},
                 normal ->
                     SR#stream_range.caller ! {eof, SR#stream_range.ref};
                 _ ->
-                    error_logger:error_msg("lookup/range failure: ~p~n",
-                                           [Reason]),
+                    lager:error("lookup/range failure: ~p", [Reason]),
                     SR#stream_range.caller
                         ! {error, SR#stream_range.ref, Reason}
             end,
@@ -606,6 +608,7 @@ read_buf_and_seg(Root) ->
     F1 = fun(Filename) ->
         Basename = filename:basename(Filename, ?DELETEME_FLAG),
         Basename1 = filename:join(Root, Basename ++ ".*"),
+        lager:info("deleting '~s'", [Basename1]),
         [ok = file:delete(X) || X <- filelib:wildcard(Basename1)]
     end,
     [F1(X) || X <- filelib:wildcard(join(Root, "*.deleted"))],
@@ -629,6 +632,7 @@ read_buf_and_seg(Root) ->
 read_segments([], _Segments) -> [];
 read_segments([SName|Rest], Segments) ->
     %% Read the segment from disk...
+    lager:info("opening segment: '~s'", [SName]),
     Segment = mi_segment:open_read(SName),
     [Segment|read_segments(Rest, Segments)].
 
@@ -645,6 +649,7 @@ read_buffers(_Root, [{_BNum, BName}], NextID, Segments) ->
 
 read_buffers(Root, [{BNum, BName}|Rest], NextID, Segments) ->
     %% Multiple buffers exist... convert them into segments...
+    lager:info("converting buffer: '~s' to segment", [BName]),
     SName = join(Root, "segment." ++ integer_to_list(BNum)),
     set_deleteme_flag(SName),
     Buffer = mi_buffer:new(BName),
