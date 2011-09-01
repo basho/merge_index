@@ -80,7 +80,7 @@ handle_info(timeout, #state{server=Server, root=Root, buffer=Buffer}=State) ->
         error:badarg ->
             lager:warning("`convert` attempted to work with a"
                           " nonexistent buffer, probably because"
-                          " drop was called"),
+                          " drop was called ~p", [erlang:get_stacktrace()]),
             {stop, buffer_dropped, State}
     end.
 
