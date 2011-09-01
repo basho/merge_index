@@ -20,25 +20,20 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-
 -module(mi_buffer_converter).
--behaviour(gen_server).
 
 %% API
 -export([start_link/3, convert/3]).
 
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3]).
-
--record(state, {server, root, buffer}).
+%% callbacks
+-export([convert/4]).
 
 %%====================================================================
 %% API
 %%====================================================================
 
 start_link(Server, Root, Buffer) ->
-    gen_server:start_link(?MODULE, [Server, Root, Buffer], []).
+    proc_lib:start_link(?MODULE, convert, [self(), Server, Root, Buffer], 1000).
 
 convert(Server, Root, Buffer) ->
     mi_buffer_converter_sup:start_child(Server, Root, Buffer).
@@ -47,19 +42,8 @@ convert(Server, Root, Buffer) ->
 %% Callbacks
 %%====================================================================
 
-init([Server, Root, Buffer]) ->
-    link(Server),
-    {ok, #state{server=Server, root=Root, buffer=Buffer}, 0}.
-
-handle_call(_Msg, _From, State) ->
-    lager:error("Unexpected call ~p", [_Msg]),
-    {reply, error, State}.
-
-handle_cast(_Msg, State) ->
-    lager:error("Unexpected cast ~p", [_Msg]),
-    {noreply, State}.
-
-handle_info(timeout, #state{server=Server, root=Root, buffer=Buffer}=State) ->
+convert(Parent, Server, Root, Buffer) ->
+    proc_lib:init_ack(Parent, {ok, self()}),
     try
         SNum  = mi_buffer:id(Buffer),
         SName = filename:join(Root, "segment." ++ integer_to_list(SNum)),
@@ -75,17 +59,11 @@ handle_info(timeout, #state{server=Server, root=Root, buffer=Buffer}=State) ->
         SegmentWO = mi_segment:open_write(SName),
         mi_segment:from_buffer(Buffer, SegmentWO),
         mi_server:buffer_to_segment(Server, Buffer, SegmentWO),
-        {stop, normal, State}
+        exit(normal)
     catch
         error:badarg ->
             lager:warning("`convert` attempted to work with a"
                           " nonexistent buffer, probably because"
                           " drop was called ~p", [erlang:get_stacktrace()]),
-            {stop, buffer_dropped, State}
+            exit(buffer_dropped)
     end.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
