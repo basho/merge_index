@@ -29,7 +29,6 @@
     compact/1,
     drop/1,
     fold/3,
-    get_id_number/1,
     has_deleteme_flag/1,
     index/2,
     info/4,
@@ -96,37 +95,6 @@ info(Server, Index, Field, Term) ->
 is_empty(Server) -> gen_server:call(Server, is_empty, infinity).
 
 fold(Server, Fun, Acc) -> gen_server:call(Server, {fold, Fun, Acc}, infinity).
-
-%% Return the ID number of a Segment/Buffer/Filename...
-%% Files can be named:
-%%   - buffer.N
-%%   - segment.N
-%%   - segment.N.data
-%%   - segment.M-N
-%%   - segment.M-N.data
-get_id_number(Segment) when element(1, Segment) == segment ->
-    Filename = mi_segment:filename(Segment),
-    get_id_number(Filename);
-get_id_number(Buffer) when element(1, Buffer) == buffer ->
-    Filename = mi_buffer:filename(Buffer),
-    get_id_number(Filename);
-get_id_number(Filename) ->
-    case string:chr(Filename, $-) == 0 of
-        true ->
-            %% Handle buffer.N, segment.N, segment.N.data
-            case string:tokens(Filename, ".") of
-                [_, N]    -> ok;
-                [_, N, _] -> ok
-            end,
-            list_to_integer(N);
-        false ->
-            %% Handle segment.M-N, segment.M-N.data
-            case string:tokens(Filename, ".-") of
-                [_, M, N]    -> ok;
-                [_, M, N, _] -> ok
-            end,
-            [list_to_integer(M), list_to_integer(N)]
-    end.
 
 lookup(Server, Index, Field, Term, Filter) ->
     Ref = make_ref(),
@@ -621,8 +589,7 @@ read_buf_and_seg(Root) ->
     %% Get buffer files, calculate the next_id, load the buffers, turn
     %% any extraneous buffers into segments...
     BufferFiles = filelib:wildcard(join(Root, "buffer.*")),
-    BufferFiles1 = lists:sort([{get_id_number(filename:basename(X)), X}
-                               || X <- BufferFiles]),
+    BufferFiles1 = lists:sort([{mi_buffer:id(X), X} || X <- BufferFiles]),
     NextID = lists:max([X || {X, _} <- BufferFiles1] ++ [0]) + 1,
     {NextID1, Buffer, Segments1} = read_buffers(Root, BufferFiles1, NextID, Segments),
 

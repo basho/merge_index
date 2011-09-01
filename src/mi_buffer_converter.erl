@@ -61,7 +61,7 @@ handle_cast(_Msg, State) ->
 
 handle_info(timeout, #state{server=Server, root=Root, buffer=Buffer}=State) ->
     try
-        SNum  = mi_server:get_id_number(mi_buffer:filename(Buffer)),
+        SNum  = mi_buffer:id(Buffer),
         SName = filename:join(Root, "segment." ++ integer_to_list(SNum)),
 
         case mi_server:has_deleteme_flag(SName) of
