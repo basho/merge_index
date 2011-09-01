@@ -188,15 +188,15 @@ handle_call({index, Postings}, _From, State) ->
             mi_buffer:close_filehandle(CurrentBuffer),
 
             ToConvert2 = queue:in(CurrentBuffer, ToConvert),
-            Converter2 =
+            {Converter2, ToConvert4} =
                 case Converter of
                     undefined ->
-                        {value, Buff} = queue:peek(ToConvert2),
+                        {Next, ToConvert3} = next_buffer_to_convert(ToConvert2),
                         {ok, Pid} = mi_buffer_converter:convert(self(),
                                                                 Root,
-                                                                Buff),
-                        Pid;
-                    _ -> Converter
+                                                                Next),
+                        {Pid, ToConvert3};
+                    _ -> {Converter, ToConvert2}
                 end,
             
             %% Create a new empty buffer...
@@ -208,7 +208,7 @@ handle_call({index, Postings}, _From, State) ->
                 next_id=NextID + 1,
                 buffer_rollover_size = fuzzed_rollover_size(),
                 converter = Converter2,
-                to_convert = ToConvert2
+                to_convert = ToConvert4
             },
             {reply, ok, NewState1};
         false ->
@@ -443,13 +443,13 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
             SegmentRO = mi_segment:open_read(mi_segment:filename(SegmentWO)),
 
             {{value, _}, ToConvert2} = queue:out(ToConvert),
-            {Converter, ToConverter3} =
-                case queue:peek(ToConvert2) of
-                    empty -> {undefined, ToConvert2};
-                    {value, Buff} ->
+            {Converter, ToConvert3} =
+                case next_buffer_to_convert(ToConvert2) of
+                    {none, ToConvert2} -> {undefined, ToConvert2};
+                    {Next, ToConvert2} ->
                         {ok, Pid} = mi_buffer_converter:convert(self(),
                                                                 Root,
-                                                                Buff),
+                                                                Next),
                         {Pid, ToConvert2}
                 end,
 
@@ -460,7 +460,7 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
                          buffers=Buffers -- [Buffer],
                          segments=NewSegments,
                          converter=Converter,
-                         to_convert=ToConverter3
+                         to_convert=ToConvert3
                         },
 
             %% Give us the opportunity to do a merge...
@@ -501,21 +501,6 @@ handle_info({'EXIT', CompactingPid, Reason},
 
     %% clear out compaction flags, so we try again when necessary
     {noreply, State#state{is_compacting=false}};
-
-handle_info({'EXIT', Converter, Reason},
-            #state{root=Root,
-                   converter=Converter, to_convert=ToConvert}=State) ->
-    case Reason of
-        normal -> {noreply, State};
-        buffer_dropped -> {noreply, State};
-        _ ->
-            {value, Buff} = queue:peek(ToConvert),
-            lager:error("Converter ~p crashed while converting buffer ~p",
-                        [Converter, Buff]),
-            lager:error("Restarting conversion of buffer ~p", [Buff]),
-            {ok, Pid} = mi_buffer_converter:convert(self(), Root, Buff),
-            {noreply, State#state{converter=Pid}}
-    end;
 
 handle_info({'EXIT', Pid, Reason},
             #state{lookup_range_pids=SRPids}=State) ->
@@ -735,3 +720,16 @@ join(Root, Name) ->
 fuzzed_rollover_size() ->
     ActualRolloverSize = element(2,application:get_env(merge_index, buffer_rollover_size)),
     mi_utils:fuzz(ActualRolloverSize, 0.25).
+
+next_buffer_to_convert(Buffers) ->
+    case queue:peek(Buffers) of
+        {value, Next} ->
+            %% Buffer may have since been dropped via merge_index:drop
+            case mi_buffer:exists(Next) of
+                true -> {Next, Buffers};
+                false ->
+                    {_, Buffers2} = queue:out(Buffers),
+                    next_buffer_to_convert(Buffers2)
+            end;
+        empty -> {none, Buffers}
+    end.

@@ -31,7 +31,7 @@ start_child(Server, Root, Buffer) ->
     supervisor:start_child(mi_buffer_converter_sup, [Server, Root, Buffer]).
 
 init([]) ->
-    Spec = {undefined,
+    Spec = {ignored,
             {mi_buffer_converter, start_link, []},
-            temporary, 1000, worker, [mi_buffer_converter]},
+            transient, 1000, worker, [mi_buffer_converter]},
     {ok, {{simple_one_for_one, 10, 1}, [Spec]}}.

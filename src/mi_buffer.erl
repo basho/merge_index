@@ -27,6 +27,7 @@
     new/1,
     filename/1,
     id/1,
+    exists/1,
     close_filehandle/1,
     delete/1,
     filesize/1,
@@ -78,6 +79,8 @@ filename(Buffer) -> Buffer#buffer.filename.
 
 id(#buffer{filename=Filename}) -> id(Filename);
 id(Filename) -> list_to_integer(tl(filename:extension(Filename))).
+
+exists(#buffer{table=Table}) -> ets:info(Table) /= undefined.
 
 delete(Buffer=#buffer{table=Table, filename=Filename}) ->
     ets:delete(Table),

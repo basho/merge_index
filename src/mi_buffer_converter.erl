@@ -61,9 +61,18 @@ convert(Parent, Server, Root, Buffer) ->
         mi_server:buffer_to_segment(Server, Buffer, SegmentWO),
         exit(normal)
     catch
-        error:badarg ->
-            lager:warning("`convert` attempted to work with a"
-                          " nonexistent buffer, probably because"
-                          " drop was called ~p", [erlang:get_stacktrace()]),
-            exit(buffer_dropped)
+        error:Reason ->
+            case mi_buffer:exists(Buffer) of
+                false ->
+                    lager:warning("conversion for buffer ~p failed, probably"
+                                  " because the buffer has been dropped ~p",
+                                  [mi_buffer:filename(Buffer),
+                                   erlang:get_stacktrace()]),
+                    exit(normal);
+                true ->
+                    lager:error("conversion for buffer ~p failed with trace ~p",
+                                [mi_buffer:filename(Buffer),
+                                 erlang:get_stacktrace()]),
+                    exit({error, Reason})
+            end
     end.
