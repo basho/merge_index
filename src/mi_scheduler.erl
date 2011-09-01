@@ -81,11 +81,11 @@ handle_call({schedule_compaction, Pid}, _From, #state { queue = Q } = State) ->
     end;
 
 handle_call(Event, _From, State) ->
-    ?PRINT({unhandled_call, Event}),
+    lager:error("unhandled_call ~p", [Event]),
     {reply, ok, State}.
 
 handle_cast(Msg, State) ->
-    ?PRINT({unhandled_cast, Msg}),
+    lager:error("unhandled_cast ~p", [Msg]),
     {noreply, State}.
 
 handle_info({worker_ready, WorkerPid}, #state { queue = Q } = State) ->
@@ -106,7 +106,7 @@ handle_info({'EXIT', WorkerPid, Reason}, #state { worker = WorkerPid } = State) 
     {noreply, NewState};
 
 handle_info(Info, State) ->
-    ?PRINT({unhandled_info, Info}),
+    lager:error("unhandled_info ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->

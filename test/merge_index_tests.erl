@@ -42,10 +42,12 @@ prop_api_test_() ->
 prop_api() ->
     application:load(merge_index),
     application:start(sasl),
+    application:start(lager),
+
     %% Comment out following lines to see error reports...otherwise
     %% it's too much noise
     error_logger:delete_report_handler(sasl_report_tty_h),
-    error_logger:delete_report_handler(error_logger_tty_h),
+    lager:set_loglevel(lager_console_backend, critical),
 
     ?FORALL(Cmds, commands(?MODULE),
             ?TRAPEXIT(

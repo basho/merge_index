@@ -29,14 +29,12 @@
     compact/1,
     drop/1,
     fold/3,
-    get_id_number/1,
     has_deleteme_flag/1,
     index/2,
     info/4,
     is_empty/1,
     lookup/5,
     range/7,
-    register_buffer_converter/2,
     set_deleteme_flag/1,
     start_link/1,
     stop/1,
@@ -59,9 +57,10 @@
     buffers,
     next_id,
     is_compacting,
-    buffer_converter,
     lookup_range_pids,
-    buffer_rollover_size
+    buffer_rollover_size,
+    converter,
+    to_convert
 }).
 
 -record(stream_range, {
@@ -97,37 +96,6 @@ is_empty(Server) -> gen_server:call(Server, is_empty, infinity).
 
 fold(Server, Fun, Acc) -> gen_server:call(Server, {fold, Fun, Acc}, infinity).
 
-%% Return the ID number of a Segment/Buffer/Filename...
-%% Files can be named:
-%%   - buffer.N
-%%   - segment.N
-%%   - segment.N.data
-%%   - segment.M-N
-%%   - segment.M-N.data
-get_id_number(Segment) when element(1, Segment) == segment ->
-    Filename = mi_segment:filename(Segment),
-    get_id_number(Filename);
-get_id_number(Buffer) when element(1, Buffer) == buffer ->
-    Filename = mi_buffer:filename(Buffer),
-    get_id_number(Filename);
-get_id_number(Filename) ->
-    case string:chr(Filename, $-) == 0 of
-        true ->
-            %% Handle buffer.N, segment.N, segment.N.data
-            case string:tokens(Filename, ".") of
-                [_, N]    -> ok;
-                [_, N, _] -> ok
-            end,
-            list_to_integer(N);
-        false ->
-            %% Handle segment.M-N, segment.M-N.data
-            case string:tokens(Filename, ".-") of
-                [_, M, N]    -> ok;
-                [_, M, N, _] -> ok
-            end,
-            [list_to_integer(M), list_to_integer(N)]
-    end.
-
 lookup(Server, Index, Field, Term, Filter) ->
     Ref = make_ref(),
     ok = gen_server:call(Server,
@@ -142,9 +110,6 @@ range(Server, Index, Field, StartTerm, EndTerm, Size, Filter) ->
                           Filter, self(), Ref},
                          infinity),
     {ok, Ref}.
-
-register_buffer_converter(Server, ConverterPid) ->
-    gen_server:cast(Server, {register_buffer_converter, ConverterPid}).
 
 set_deleteme_flag(Filename) ->
     file:write_file(Filename ++ ?DELETEME_FLAG, "").
@@ -173,9 +138,6 @@ init([Root]) ->
     %% don't pull down this merge_index if they fail
     process_flag(trap_exit, true),
 
-    %% Use a dedicated worker sub-process to do the 
-    {ok, ConverterSup} = mi_buffer_converter:start_link(self(), Root),
-
     %% Create the state...
     State = #state {
         root     = Root,
@@ -184,20 +146,20 @@ init([Root]) ->
         segments = Segments,
         next_id  = NextID,
         is_compacting = false,
-        buffer_converter = {ConverterSup, undefined},
         lookup_range_pids = [],
-        buffer_rollover_size=fuzzed_rollover_size()
+        buffer_rollover_size=fuzzed_rollover_size(),
+        to_convert = queue:new()
     },
 
     lager:info("finished loading merge_index '~s' with rollover size ~p",
                [Root, State#state.buffer_rollover_size]),
     {ok, State}.
 
-
 handle_call({index, Postings}, _From, State) ->
     %% Write to the buffer...
     #state { buffers=[CurrentBuffer0|Buffers],
-             buffer_converter={_,ConverterWorker},
+             converter=Converter,
+             to_convert=ToConvert,
              root=Root} = State,
 
     %% By multiplying the timestamp by -1 and swapping order of TS and
@@ -224,9 +186,18 @@ handle_call({index, Postings}, _From, State) ->
             
             %% Close the buffer filehandle. Needs to be done in the owner process.
             mi_buffer:close_filehandle(CurrentBuffer),
-            
-            mi_buffer_converter:convert(
-              ConverterWorker, Root, CurrentBuffer),
+
+            ToConvert2 = queue:in(CurrentBuffer, ToConvert),
+            {Converter2, ToConvert4} =
+                case Converter of
+                    undefined ->
+                        {Next, ToConvert3} = next_buffer_to_convert(ToConvert2),
+                        {ok, Pid} = mi_buffer_converter:convert(self(),
+                                                                Root,
+                                                                Next),
+                        {Pid, ToConvert3};
+                    _ -> {Converter, ToConvert2}
+                end,
             
             %% Create a new empty buffer...
             BName = join(NewState, "buffer." ++ integer_to_list(NextID)),
@@ -235,7 +206,9 @@ handle_call({index, Postings}, _From, State) ->
             NewState1 = NewState#state {
                 buffers=[NewBuffer|NewState#state.buffers],
                 next_id=NextID + 1,
-                buffer_rollover_size = fuzzed_rollover_size()
+                buffer_rollover_size = fuzzed_rollover_size(),
+                converter = Converter2,
+                to_convert = ToConvert4
             },
             {reply, ok, NewState1};
         false ->
@@ -408,14 +381,16 @@ handle_call(drop, _From, State) ->
     Buffer = mi_buffer:new(BufferFile),
     NewState = State#state { locks = mi_locks:new(),
                              buffers = [Buffer],
-                             segments = [] },
+                             segments = [],
+                             converter = undefined,
+                             to_convert = queue:new()},
     {reply, ok, NewState};
 
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
 
-handle_call(Request, _From, State) ->
-    ?PRINT({unhandled_call, Request}),
+handle_call(Msg, _From, State) ->
+    lager:error("Unexpected call ~p", [Msg]),
     {reply, ok, State}.
 
 handle_cast({compacted, CompactSegmentWO, OldSegments, OldBytes, From}, State) ->
@@ -447,7 +422,9 @@ handle_cast({compacted, CompactSegmentWO, OldSegments, OldBytes, From}, State) -
     {noreply, NewState};
 
 handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
-    #state { locks=Locks, buffers=Buffers, segments=Segments, is_compacting=IsCompacting } = State,
+    #state { root=Root, locks=Locks, buffers=Buffers, segments=Segments,
+             to_convert=ToConvert,
+             is_compacting=IsCompacting } = State,
 
     %% Clean up by clearing delete flag on the segment, adding delete
     %% flag to the buffer, and telling the system to delete the buffer
@@ -465,12 +442,25 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
             %% Open the segment as read only...
             SegmentRO = mi_segment:open_read(mi_segment:filename(SegmentWO)),
 
+            {{value, _}, ToConvert2} = queue:out(ToConvert),
+            {Converter, ToConvert3} =
+                case next_buffer_to_convert(ToConvert2) of
+                    {none, ToConvert2} -> {undefined, ToConvert2};
+                    {Next, ToConvert2} ->
+                        {ok, Pid} = mi_buffer_converter:convert(self(),
+                                                                Root,
+                                                                Next),
+                        {Pid, ToConvert2}
+                end,
+
             %% Update state...
             NewSegments = [SegmentRO|Segments],
             NewState = State#state {
                          locks=NewLocks,
                          buffers=Buffers -- [Buffer],
-                         segments=NewSegments
+                         segments=NewSegments,
+                         converter=Converter,
+                         to_convert=ToConvert3
                         },
 
             %% Give us the opportunity to do a merge...
@@ -489,21 +479,8 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
             {noreply, State}
     end;
 
-handle_cast({register_buffer_converter, ConverterWorker},
-            #state{buffer_converter={ConverterSup,_},
-                   buffers=Buffers,
-                   root=Root}=State) ->
-    %% a new buffer converter started - queue all buffers but the
-    %% current one for conversion to segments
-    
-    %% current buffer is hd(Buffers), so just convert tl(Buffers)
-    [ mi_buffer_converter:convert(ConverterWorker, Root, B)
-      || B <- tl(Buffers) ],
-
-    {noreply, State#state{buffer_converter={ConverterSup, ConverterWorker}}};
-
 handle_cast(Msg, State) ->
-    ?PRINT({unhandled_cast, Msg}),
+    lager:error("Unexpected cast ~p", [Msg]),
     {noreply, State}.
 
 handle_info({'EXIT', CompactingPid, Reason},
@@ -524,10 +501,6 @@ handle_info({'EXIT', CompactingPid, Reason},
 
     %% clear out compaction flags, so we try again when necessary
     {noreply, State#state{is_compacting=false}};
-handle_info({'EXIT', ConverterSup, Reason},
-            #state{buffer_converter={ConverterSup, _}}=State) ->
-    %% if our converter's supervisor died, there's a problem: exit
-    {stop, {buffer_converter_death, Reason}, State};
 
 handle_info({'EXIT', Pid, Reason},
             #state{lookup_range_pids=SRPids}=State) ->
@@ -566,8 +539,8 @@ handle_info({'EXIT', Pid, Reason},
             {noreply, State}
     end;
 
-handle_info(Info, State) ->
-    ?PRINT({unhandled_info, Info}),
+handle_info(Msg, State) ->
+    lager:error("Unexpected info ~p", [Msg]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -601,8 +574,7 @@ read_buf_and_seg(Root) ->
     %% Get buffer files, calculate the next_id, load the buffers, turn
     %% any extraneous buffers into segments...
     BufferFiles = filelib:wildcard(join(Root, "buffer.*")),
-    BufferFiles1 = lists:sort([{get_id_number(filename:basename(X)), X}
-                               || X <- BufferFiles]),
+    BufferFiles1 = lists:sort([{mi_buffer:id(X), X} || X <- BufferFiles]),
     NextID = lists:max([X || {X, _} <- BufferFiles1] ++ [0]) + 1,
     {NextID1, Buffer, Segments1} = read_buffers(Root, BufferFiles1, NextID, Segments),
 
@@ -748,3 +720,16 @@ join(Root, Name) ->
 fuzzed_rollover_size() ->
     ActualRolloverSize = element(2,application:get_env(merge_index, buffer_rollover_size)),
     mi_utils:fuzz(ActualRolloverSize, 0.25).
+
+next_buffer_to_convert(Buffers) ->
+    case queue:peek(Buffers) of
+        {value, Next} ->
+            %% Buffer may have since been dropped via merge_index:drop
+            case mi_buffer:exists(Next) of
+                true -> {Next, Buffers};
+                false ->
+                    {_, Buffers2} = queue:out(Buffers),
+                    next_buffer_to_convert(Buffers2)
+            end;
+        empty -> {none, Buffers}
+    end.
