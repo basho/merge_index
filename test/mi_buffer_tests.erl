@@ -102,6 +102,37 @@ check_count(Root, Entries, IFT) ->
     mi_buffer:delete(Buffer),
     equals(C1, C2).
 
+prop_truncation_test(Root) ->
+    ?LET(Entries,
+         non_empty(list({g_ift(), g_value(), g_tstamp(), g_props()})),
+         begin
+             try
+                 Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
+                 BufferLen = mi_buffer:filesize(Buffer),                 
+                 ?FORALL(TruncateBy,
+                         choose(1, BufferLen-1), check_truncation(Buffer, Entries, TruncateBy))
+              after
+                 catch file:delete(Root ++ "_buffer")
+              end
+         end).
+
+check_truncation({buffer, Filename, FileHandle, EtsTable, _OrigSize} = Buffer, Entries, TruncateBy) ->
+    %% This is vulnerable to record format changes. mi_buffer should
+    %% provide an hrl with the record or its own "close" function.
+    {ok, _Offset} = file:position(FileHandle, {eof, TruncateBy}),
+    ok = file:truncate(FileHandle),
+    mi_buffer:close_filehandle(Buffer),
+    ets:delete(EtsTable),
+    NewBuffer = mi_buffer:new(Filename),
+    {buffer,_,_,NewEts,_} = NewBuffer,
+    try
+        Stored = ets:tab2list(NewEts),
+        equals([], [IFT || IFT <- Stored,
+                           not lists:member(IFT, Entries)])
+    after
+        mi_buffer:delete(NewBuffer)
+    end.
+
 prop_basic_test_() ->
     test_spec("/tmp/test/mi_buffer_basic", fun prop_basic_test/1).
 
@@ -113,5 +144,8 @@ prop_iter_range_test_() ->
 
 prop_info_test_() ->
     test_spec("/tmp/test/mi_buffer_info", fun prop_info_test/1).
+
+prop_truncation_test_() ->
+    test_spec("/tmp/test/mi_buffer_truncation", fun prop_truncation_test/1).
 
 -endif.

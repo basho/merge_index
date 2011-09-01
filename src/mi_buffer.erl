@@ -57,18 +57,18 @@ new(Filename) ->
 
     %% Read into an ets table...
     Table = ets:new(buffer, [duplicate_bag, public]),
-    open_inner(FH, Table),
+    open_inner(FH, Table, Filename),
     {ok, Size} = file:position(FH, cur),
 
     lager:info("opened buffer '~s'", [Filename]),
     %% Return the buffer.
     #buffer { filename=Filename, handle=FH, table=Table, size=Size }.
 
-open_inner(FH, Table) ->
-    case read_value(FH) of
+open_inner(FH, Table, Filename) ->
+    case read_value(FH, Filename) of
         {ok, Postings} ->
             write_to_ets(Table, Postings),
-            open_inner(FH, Table);
+            open_inner(FH, Table, Filename);
         eof ->
             ok
     end.
@@ -147,14 +147,29 @@ iterate_list([H|T]) ->
 %% Internal functions
 %% ===================================================================
 
-read_value(FH) ->
+read_value(FH, Filename) ->
+    {ok, CurrPos} = file:position(FH, cur),
     case file:read(FH, 4) of
-        {ok, <<Size:32/unsigned-integer>>} ->
-            {ok, B} = file:read(FH, Size),
-            {ok, binary_to_term(B)};
+        {ok, <<Size:32/unsigned-integer>>} when Size > 0->
+            case file:read(FH, Size) of
+                {ok, <<B:Size/binary>>} ->
+                    {ok, binary_to_term(B)};
+                _ ->
+                    log_truncation(Filename, CurrPos),
+                    file:position(FH, {bof, CurrPos}),
+                    eof
+            end;
+        {ok, _Binary}  ->
+            log_truncation(Filename, CurrPos),
+            file:position(FH, {bof, CurrPos}),
+            eof;
         eof ->
             eof
     end.
+
+log_truncation(Filename, Position) ->
+    error_logger:warning_msg("Corrupted posting detected in ~s after reading ~w bytes, ignoring remainder.",
+                          [Filename, Position]).
 
 write_to_file(FH, Terms) when is_list(Terms) ->
     %% Convert all values to binaries, count the bytes.
