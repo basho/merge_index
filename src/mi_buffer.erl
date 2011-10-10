@@ -125,7 +125,7 @@ iterator(Buffer) ->
     List1 = lists:sort(ets:tab2list(Table)),
     List2 = [{I,F,T,V,K,P} || {{I,F,T},V,K,P} <- List1],
     fun() -> iterate_list(List2) end.
-    
+
 %% Return an iterator that traverses the values for a term in the buffer.
 iterator(Index, Field, Term, Buffer) ->
     Table = Buffer#buffer.table,
@@ -198,16 +198,16 @@ add_field_term(_Field, _Term, Props) ->
 %% @doc Given and Index, Field, StartTerm, EndTerm, and Size, return a
 %%      filter function that returns true if the provided Key (of
 %%      format {Index, Field, Term}) is within the acceptable range.
--spec gen_filter(merge_index:index(), merge_index:field(), 
-                 merge_index:mi_term(), merge_index:mi_term(), 
-                 merge_index:size()) -> 
+-spec gen_filter(merge_index:index(), merge_index:field(),
+                 merge_index:mi_term(), merge_index:mi_term(),
+                 merge_index:size()) ->
                         fun((merge_index:index(), merge_index:field(), merge_index:mi_term()) -> boolean()).
 gen_filter(Index, Field, StartTerm, EndTerm, Size) ->
     %% Construct a function to check start bounds...
     StartFun = case StartTerm of
                    undefined ->
-                       fun({KeyIndex, KeyField, _}) -> 
-                               {KeyIndex, KeyField} >= {Index, Field} 
+                       fun({KeyIndex, KeyField, _}) ->
+                               {KeyIndex, KeyField} >= {Index, Field}
                        end;
                    _ ->
                        fun(Key) ->
@@ -218,8 +218,8 @@ gen_filter(Index, Field, StartTerm, EndTerm, Size) ->
     %% Construct a function to check end bounds...
     EndFun = case EndTerm of
                    undefined ->
-                       fun({KeyIndex, KeyField, _}) -> 
-                               {KeyIndex, KeyField} =< {Index, Field} 
+                       fun({KeyIndex, KeyField, _}) ->
+                               {KeyIndex, KeyField} =< {Index, Field}
                        end;
                    _ ->
                        fun(Key) ->
