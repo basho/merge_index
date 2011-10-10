@@ -130,7 +130,7 @@ iterator(Buffer) ->
 iterator(Index, Field, Term, Buffer) ->
     Table = Buffer#buffer.table,
     List1 = ets:lookup(Table, {Index, Field, Term}),
-    List2 = [{V,K, add_field_term(Field, Term, P)} || {_Key,V,K,P} <- List1],
+    List2 = [{V,K,P} || {_Key,V,K,P} <- List1],
     List3 = lists:sort(List2),
     fun() -> iterate_list(List3) end.
 
@@ -187,12 +187,6 @@ write_to_file(FH, Terms) when is_list(Terms) ->
 
 write_to_ets(Table, Postings) ->
     ets:insert(Table, Postings).
-
-add_field_term(Field, Term, Props) when is_list(Props) ->
-    [{Field, Term}|Props];
-add_field_term(_Field, _Term, Props) ->
-    Props.
-
 
 %% @private
 %% @doc Given and Index, Field, StartTerm, EndTerm, and Size, return a

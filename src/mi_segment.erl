@@ -245,13 +245,7 @@ iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
                     file:read(File, ValuesSize),
                     iterate_by_term(File, CurrKey, KeyInfoList, Key);
                 CurrKey == Key ->
-                    {_, Field, Term} = CurrKey,
-                    Transform =
-                        fun({V, K, P}) when is_list(P) ->
-                                {V, K, [{Field, Term}|P]};
-                           (Other) ->
-                                Other
-                        end,
+                    Transform = fun(X) -> X end,
                     WhenDone = fun(_) -> file:close(File), eof end,
                     fun() -> iterate_by_term_values(File, Transform, WhenDone) end;
                 CurrKey > Key ->
@@ -373,9 +367,6 @@ possibly_add_iterator({_, Field, Term}, Results, IteratorsAcc) ->
 %% Turn a list into an iterator.
 iterate_list(_, _, []) ->
     eof;
-iterate_list(Field, Term, [{V,K,P}|T]) when is_list(P) ->
-    NewH = {V, K, [{Field, Term}|P]},
-    {NewH, fun() -> iterate_list(Field, Term, T) end};
 iterate_list(Field, Term, [H|T]) ->
     {H, fun() -> iterate_list(Field, Term, T) end}.
 
