@@ -74,7 +74,7 @@ check_range(Root, Entries, Range) ->
     {Index, Field, StartTerm} = Start,
     {Index, Field, EndTerm} = End,
 
-    L1 = [{V, K, [{F,T}|P]} || {{_, F, T}=IFT, V, K, P} <- Entries,
+    L1 = [{V, K, P} || {IFT, V, K, P} <- Entries,
                        IFT >= Start, IFT =< End],
 
     Itrs = mi_buffer:iterators(Index, Field, StartTerm, EndTerm, all, Buffer),
