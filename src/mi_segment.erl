@@ -49,7 +49,7 @@
 
 
 %% MIN_VALUE is used during range searches. Numbers sort the smallest
-%% in Erlang (http://www.erlang.org/doc/reference_manual/expressions.html), 
+%% in Erlang (http://www.erlang.org/doc/reference_manual/expressions.html),
 %% so this is just a very small number.
 -define(MIN_VALUE, -9223372036854775808). %% -1 * (2^63)).
 
@@ -89,7 +89,7 @@ open_write(Root) ->
             file:write_file(offsets_file(Root), <<"">>),
             lager:info("opened segment '~s' for write", [Root]),
             #segment {
-                       root = Root,     
+                       root = Root,
                        offsets_table = ets:new(segment_offsets, [ordered_set, public])
                      }
     end.
@@ -120,7 +120,7 @@ info(Index, Field, Term, Segment) ->
     case get_offset_entry(Key, Segment) of
         {OffsetEntryKey, {_, Bloom, _, KeyInfoList}} ->
             case mi_bloom:is_element(Key, Bloom) of
-                true  -> 
+                true  ->
                     {_, _, OffsetEntryTerm} = OffsetEntryKey,
                     EditSig = mi_utils:edit_signature(OffsetEntryTerm, Term),
                     HashSig = mi_utils:hash_signature(Term),
@@ -128,12 +128,12 @@ info(Index, Field, Term, Segment) ->
                                 case EditSig == EditSig2 andalso HashSig == HashSig2 of
                                     true ->
                                         Acc + Count;
-                                    false -> 
+                                    false ->
                                         Acc
                                 end
                         end,
                     lists:foldl(F, 0, KeyInfoList);
-                false -> 
+                false ->
                     0
             end;
         _ ->
@@ -174,7 +174,7 @@ iterate_all_bytes_1(Key, [Result|Results], Rest) ->
     {{I,F,T,V,K,P}, fun() -> iterate_all_bytes_1(Key, Results, Rest) end};
 iterate_all_bytes_1(Key, [], Rest) ->
     iterate_all_bytes(Key, Rest).
-    
+
 %% @private Create an iterator over a filehandle starting at position
 %% 0 of the segment.
 iterate_all_filehandle(File, BaseKey, {key, ShrunkenKey}) ->
@@ -199,7 +199,7 @@ iterator(Index, Field, Term, Segment) ->
             %% If we're aiming for an exact match, then check the
             %% bloom filter.
             case mi_bloom:is_element(Key, Bloom) of
-                true -> 
+                true ->
                     {_, _, OffsetEntryTerm} = OffsetEntryKey,
                     EditSig = mi_utils:edit_signature(OffsetEntryTerm, Term),
                     HashSig = mi_utils:hash_signature(Term),
@@ -232,7 +232,7 @@ iterate_by_keyinfo(_, _, _, _, _, [], _) ->
 %% section we want.
 iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
     %% Read the next entry in the segment file.  Value should be a
-    %% key, otherwise error. 
+    %% key, otherwise error.
     case read_seg_entry(File) of
         {key, ShrunkenKey} ->
             CurrKey = expand_key(BaseKey, ShrunkenKey),
@@ -240,18 +240,12 @@ iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
             %% jumping. If it's the one we need, then iterate
             %% values. Otherwise, it's too big, so close the file and
             %% return.
-            if 
+            if
                 CurrKey < Key ->
                     file:read(File, ValuesSize),
                     iterate_by_term(File, CurrKey, KeyInfoList, Key);
                 CurrKey == Key ->
-                    {_, Field, Term} = CurrKey,
-                    Transform =
-                        fun({V, K, P}) when is_list(P) ->
-                                {V, K, [{Field, Term}|P]};
-                           (Other) ->
-                                Other
-                        end,
+                    Transform = fun(X) -> X end,
                     WhenDone = fun(_) -> file:close(File), eof end,
                     fun() -> iterate_by_term_values(File, Transform, WhenDone) end;
                 CurrKey > Key ->
@@ -267,7 +261,7 @@ iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
 iterate_by_term(File, _, [], _) ->
     file:close(File),
     fun() -> eof end.
-    
+
 iterate_by_term_values(File, TransformFun, WhenDoneFun) ->
     %% Read the next value, expose as iterator.
     case read_seg_entry(File) of
@@ -323,7 +317,7 @@ iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm, Size,
             %% jumping. If it's in the range we need, then iterate
             %% values. Otherwise, it's too big, so close the file and
             %% return.
-            if 
+            if
                 CurrKey < {Index, Field, StartTerm} ->
                     iterate_range_by_term_1(File, CurrKey, Index, Field,
                                             StartTerm, EndTerm, Size,
@@ -369,13 +363,10 @@ possibly_add_iterator({_, Field, Term}, Results, IteratorsAcc) ->
     Results1 = lists:flatten(lists:reverse(Results)),
     Iterator = fun() -> iterate_list(Field, Term, Results1) end,
     [Iterator|IteratorsAcc].
-    
+
 %% Turn a list into an iterator.
 iterate_list(_, _, []) ->
     eof;
-iterate_list(Field, Term, [{V,K,P}|T]) when is_list(P) ->
-    NewH = {V, K, [{Field, Term}|P]},
-    {NewH, fun() -> iterate_list(Field, Term, T) end};
 iterate_list(Field, Term, [H|T]) ->
     {H, fun() -> iterate_list(Field, Term, T) end}.
 
@@ -387,9 +378,9 @@ get_offset_entry(Key, Segment) ->
     case ets:lookup(Segment#segment.offsets_table, Key) of
         [] ->
             case ets:next(Segment#segment.offsets_table, Key) of
-                '$end_of_table' -> 
+                '$end_of_table' ->
                     undefined;
-                OffsetKey ->    
+                OffsetKey ->
                     %% Look up the offset information.
                     [{OffsetKey, Value}] = ets:lookup(Segment#segment.offsets_table, OffsetKey),
                     {OffsetKey, binary_to_term(Value)}
