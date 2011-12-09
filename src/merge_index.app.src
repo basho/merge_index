@@ -4,6 +4,7 @@
      {applications, [kernel,
                      stdlib,
                      sasl]},
+     {registered,[]},
      {mod, {mi_app, []}},
      {env, [
             {data_root, "data/merge_index"},
