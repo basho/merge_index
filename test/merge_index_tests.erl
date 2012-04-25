@@ -42,6 +42,8 @@ prop_api_test_() ->
 prop_api() ->
     application:load(merge_index),
     application:start(sasl),
+    application:start(syntax_tools),
+    application:start(compiler),
     application:start(lager),
 
     %% Comment out following lines to see error reports...otherwise
