@@ -40,6 +40,7 @@
     index/2,
     lookup/5, lookup_sync/5,
     range/7, range_sync/7,
+    iterator/2,
     info/4,
     is_empty/1,
     fold/3,
@@ -79,6 +80,13 @@ index(Server, Postings) -> mi_server:index(Server, Postings).
 -spec info(pid(), index(), field(), mi_term()) ->
                   {ok, [{Term::any(), Weight::integer()}]}.
 info(Server, Index, Field, Term) -> mi_server:info(Server, Index, Field, Term).
+
+%% @doc Return an `Iterator' over the entire index using the given
+%%      `Filter'.
+-spec iterator(pid(), function()) -> Iterator::iterator().
+iterator(Server, Filter) ->
+    {ok, Ref} = mi_server:iterator(Server, Filter),
+    make_result_iterator(Ref).
 
 %% @doc Lookup the results for IFT and return an iterator.  This
 %% allows the caller to process data as it comes in/wants it.

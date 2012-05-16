@@ -33,6 +33,7 @@
     index/2,
     info/4,
     is_empty/1,
+    iterator/2,
     lookup/5,
     range/7,
     set_deleteme_flag/1,
@@ -48,7 +49,9 @@
 ]).
 
 -export([lookup/8,
-         range/10]).
+         range/10,
+         iterate/6,
+         iterate2/5]).
 
 -record(state, {
     root,
@@ -93,6 +96,11 @@ info(Server, Index, Field, Term) ->
     gen_server:call(Server, {info, Index, Field, Term}, infinity).
 
 is_empty(Server) -> gen_server:call(Server, is_empty, infinity).
+
+iterator(Server, Filter) ->
+    Ref = make_ref(),
+    gen_server:call(Server, {iterator, Filter, self(), Ref}, infinity),
+    {ok, Ref}.
 
 fold(Server, Fun, Acc) -> gen_server:call(Server, {fold, Fun, Acc}, infinity).
 
@@ -351,7 +359,7 @@ handle_call({fold, FoldFun, Acc}, _From, State) ->
 
     %% Reply...
     {reply, {ok, Acc2}, State};
-    
+
 handle_call(is_empty, _From, State) ->
     %% Check if we have buffer data...
     case State#state.buffers of
@@ -369,6 +377,42 @@ handle_call(is_empty, _From, State) ->
     %% Return.
     IsEmpty = (not HasBufferData) andalso (not HasSegmentData),
     {reply, IsEmpty, State};
+
+handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
+    #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
+
+    %% lock the buffers + segments so that they are not deleted while
+    %% being iterated
+    F1 = fun(Buffer, Acc) ->
+                 mi_locks:claim(mi_buffer:filename(Buffer), Acc)
+         end,
+    NewLocks = lists:foldl(F1, Locks, Buffers),
+
+    F2 = fun(Segment, Acc) ->
+                 mi_locks:claim(mi_segment:filename(Segment), Acc)
+         end,
+    NewLocks1 = lists:foldl(F2, NewLocks, Segments),
+
+    %% build ordered iterator over all buffers + segments
+    %%
+    %% TODO: maybe don't bother with order here since this is for
+    %% repair?
+    BufferItrs = [mi_buffer:iterator(B) || B <- Buffers],
+    SegmentItrs = [mi_segment:iterator(S) || S <- Segments],
+    Itr = build_iterator_tree(BufferItrs ++ SegmentItrs),
+
+    Args = [Filter, DestPid, DestRef, Itr(), []],
+    ItrPid = spawn_link(?MODULE, iterate2, Args),
+
+    NewPids = [ #stream_range{pid=ItrPid,
+                              caller=DestPid,
+                              ref=DestRef,
+                              buffers=Buffers,
+                              segments=Segments}
+                | State#state.lookup_range_pids ],
+
+    State2 = State#state{locks=NewLocks1, lookup_range_pids=NewPids},
+    {reply, {ok, Itr}, State2};
 
 %% TODO what about resetting next_id?
 handle_call(drop, _From, State) ->
@@ -639,6 +683,10 @@ iterate(_Filter, Pid, Ref, LastValue, Iterator, Acc)
     iterate(_Filter, Pid, Ref, LastValue, Iterator, []);
 iterate(Filter, _Pid, _Ref, LastValue,
                       {{Value, _TS, Props}, Iter}, Acc) ->
+    %% TODO: Ideally, dedup should happen a layer above, as noted in
+    %% the following issue.
+    %%
+    %% https://issues.basho.com/show_bug.cgi?id=1099
     IsDuplicate = (LastValue == Value),
     IsDeleted = (Props == undefined),
     case (not IsDuplicate) andalso (not IsDeleted)
@@ -648,18 +696,32 @@ iterate(Filter, _Pid, _Ref, LastValue,
         false ->
             iterate(Filter, _Pid, _Ref, Value, Iter(), Acc)
     end;
-iterate(Filter, _Pid, _Ref, LastValue,
-                      {{_I, _F, _T, Value, _TS, Props}=E, Iter}, Acc) ->
-    IsDuplicate = (LastValue == Value),
-    IsDeleted = (Props == undefined),
-    case (not IsDuplicate) andalso (not IsDeleted)
-        andalso Filter(Value, Props) of
-        true  ->
-            iterate(Filter, _Pid, _Ref, Value, Iter(), [E|Acc]);
-        false ->
-            iterate(Filter, _Pid, _Ref, Value, Iter(), Acc)
-    end;
 iterate(_, Pid, Ref, _, eof, Acc) ->
+    Pid ! {results, lists:reverse(Acc), Ref},
+    ok.
+
+%% This is currently a copy/paste of iterate with specific changes
+%% noted below.
+%%
+%% Don't dedup here as this is being used for async folding that drives
+%% handoff/repair.  The reason dedup is bad here is because for the
+%% purpose of handoff/repair you want _all_ IFTs for a given Value.
+%%
+%% Don't check if deleted because tombstones need to be replicate or
+%% else indexes will reappear when they shouldn't.
+iterate2(_Filter, Pid, Ref, Iterator, Acc)
+  when length(Acc) > ?RESULTVEC_SIZE ->
+    Pid ! {results, lists:reverse(Acc), Ref},
+    iterate2(_Filter, Pid, Ref, Iterator, []);
+iterate2(Filter, _Pid, _Ref, {{I, F, T, Value, TS, Props}, Iter}, Acc) ->
+    case Filter(Value, Props) of
+        true  ->
+            V = {I, F, T, Value, -1 * TS, Props},
+            iterate2(Filter, _Pid, _Ref, Iter(), [V|Acc]);
+        false ->
+            iterate2(Filter, _Pid, _Ref, Iter(), Acc)
+    end;
+iterate2(_, Pid, Ref, eof, Acc) ->
     Pid ! {results, lists:reverse(Acc), Ref},
     ok.
 
