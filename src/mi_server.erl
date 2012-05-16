@@ -50,7 +50,7 @@
 -export([lookup/8,
          range/10]).
 
--record(state, { 
+-record(state, {
     root,
     locks,
     segments,
@@ -129,7 +129,7 @@ init([Root]) ->
     lager:debug("loading merge_index '~s'", [Root]),
     %% Seed the random generator...
     random:seed(now()),
-    
+
     %% Load from disk...
     filelib:ensure_dir(join(Root, "ignore")),
     {NextID, Buffer, Segments} = read_buf_and_seg(Root),
@@ -179,11 +179,11 @@ handle_call({index, Postings}, _From, State) ->
     %% Update the state...
     NewState = State#state {buffers = [CurrentBuffer | Buffers]},
 
-    %% Possibly dump buffer to a new segment. 
+    %% Possibly dump buffer to a new segment.
     case mi_buffer:filesize(CurrentBuffer) > State#state.buffer_rollover_size of
         true ->
             #state { next_id=NextID } = NewState,
-            
+
             %% Close the buffer filehandle. Needs to be done in the owner process.
             mi_buffer:close_filehandle(CurrentBuffer),
 
@@ -198,11 +198,11 @@ handle_call({index, Postings}, _From, State) ->
                         {Pid, ToConvert3};
                     _ -> {Converter, ToConvert2}
                 end,
-            
+
             %% Create a new empty buffer...
             BName = join(NewState, "buffer." ++ integer_to_list(NextID)),
             NewBuffer = mi_buffer:new(BName),
-            
+
             NewState1 = NewState#state {
                 buffers=[NewBuffer|NewState#state.buffers],
                 next_id=NextID + 1,
@@ -215,7 +215,7 @@ handle_call({index, Postings}, _From, State) ->
             {reply, ok, NewState}
     end;
 
-handle_call(start_compaction, _From, State) 
+handle_call(start_compaction, _From, State)
   when is_tuple(State#state.is_compacting) orelse length(State#state.segments) =< 5 ->
     %% Don't compact if we are already compacting, or if we have fewer
     %% than five open segments.
@@ -234,7 +234,7 @@ handle_call(start_compaction, From, State) ->
                                 STC
                         end,
     BytesToCompact = lists:sum([mi_segment:filesize(X) || X <- SegmentsToCompact]),
-    
+
     %% Spawn a function to merge a bunch of segments into one...
     Pid = self(),
     CompactingPid = spawn_opt(fun() ->
@@ -247,7 +247,7 @@ handle_call(start_compaction, From, State) ->
         SName = join(State, io_lib:format("segment.~.16B", [MD5])),
         set_deleteme_flag(SName),
         CompactSegment = mi_segment:open_write(SName),
-        
+
         %% Run the compaction...
         mi_segment:from_iterator(GroupIterator, CompactSegment),
         gen_server:cast(Pid, {compacted, CompactSegment, SegmentsToCompact, BytesToCompact, From})
@@ -258,11 +258,11 @@ handle_call({info, Index, Field, Term}, _From, State) ->
     %% Calculate the IFT...
     #state { buffers=Buffers, segments=Segments } = State,
 
-    %% Look up the weights in segments. 
+    %% Look up the weights in segments.
     BufferCount = [mi_buffer:info(Index, Field, Term, X) || X <- Buffers],
     SegmentCount = [mi_segment:info(Index, Field, Term, X) || X <- Segments],
     TotalCount = lists:sum([0|BufferCount]) + lists:sum([0|SegmentCount]),
-    
+
     {reply, {ok, TotalCount}, State};
 
 handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
@@ -293,7 +293,7 @@ handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
                 | State#state.lookup_range_pids ],
     {reply, ok, State#state { locks=NewLocks1,
                               lookup_range_pids=NewPids }};
-    
+
 handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
             _From, State) ->
     #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
@@ -336,14 +336,14 @@ handle_call({fold, FoldFun, Acc}, _From, State) ->
     end,
 
     %% Fold through all the buffers...
-    F1 = fun(Buffer, AccIn) -> 
+    F1 = fun(Buffer, AccIn) ->
                  Iterator = mi_buffer:iterator(Buffer),
                  fold_itr(WrappedFun, AccIn, Iterator())
          end,
     Acc1 = lists:foldl(F1, Acc, Buffers),
 
     %% Fold through all the segments...
-    F2 = fun(Segment, AccIn) -> 
+    F2 = fun(Segment, AccIn) ->
                  Iterator = mi_segment:iterator(Segment),
                  fold_itr(WrappedFun, AccIn, Iterator())
          end,
@@ -355,7 +355,7 @@ handle_call({fold, FoldFun, Acc}, _From, State) ->
 handle_call(is_empty, _From, State) ->
     %% Check if we have buffer data...
     case State#state.buffers of
-        [] -> 
+        [] ->
             HasBufferData = false;
         [Buffer] ->
             HasBufferData = mi_buffer:size(Buffer) > 0;
@@ -633,7 +633,7 @@ range(Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref,
     iterate(Filter, Pid, Ref, undefined, GroupIterator(), []),
     ok.
 
-iterate(_Filter, Pid, Ref, LastValue, Iterator, Acc) 
+iterate(_Filter, Pid, Ref, LastValue, Iterator, Acc)
   when length(Acc) > ?RESULTVEC_SIZE ->
     Pid ! {results, lists:reverse(Acc), Ref},
     iterate(_Filter, Pid, Ref, LastValue, Iterator, []);
@@ -643,17 +643,28 @@ iterate(Filter, _Pid, _Ref, LastValue,
     IsDeleted = (Props == undefined),
     case (not IsDuplicate) andalso (not IsDeleted)
         andalso Filter(Value, Props) of
-        true  -> 
+        true  ->
             iterate(Filter, _Pid, _Ref, Value, Iter(), [{Value, Props}|Acc]);
-        false -> 
+        false ->
             iterate(Filter, _Pid, _Ref, Value, Iter(), Acc)
     end;
-iterate(_, Pid, Ref, _, eof, Acc) -> 
+iterate(Filter, _Pid, _Ref, LastValue,
+                      {{_I, _F, _T, Value, _TS, Props}=E, Iter}, Acc) ->
+    IsDuplicate = (LastValue == Value),
+    IsDeleted = (Props == undefined),
+    case (not IsDuplicate) andalso (not IsDeleted)
+        andalso Filter(Value, Props) of
+        true  ->
+            iterate(Filter, _Pid, _Ref, Value, Iter(), [E|Acc]);
+        false ->
+            iterate(Filter, _Pid, _Ref, Value, Iter(), Acc)
+    end;
+iterate(_, Pid, Ref, _, eof, Acc) ->
     Pid ! {results, lists:reverse(Acc), Ref},
     ok.
 
 %% Chain a list of iterators into what looks like one single
-%% iterator. 
+%% iterator.
 build_iterator_tree([]) ->
     fun() -> eof end;
 build_iterator_tree(Iterators) ->
@@ -679,11 +690,11 @@ group_iterator(I1 = {Term1, Iterator1}, I2 = {Term2, Iterator2}) ->
             NewIterator = fun() -> group_iterator(I1, Iterator2()) end,
             {Term2, NewIterator}
     end;
-group_iterator(eof, eof) -> 
+group_iterator(eof, eof) ->
     eof;
-group_iterator(eof, Iterator) -> 
+group_iterator(eof, Iterator) ->
     Iterator;
-group_iterator(Iterator, eof) -> 
+group_iterator(Iterator, eof) ->
     Iterator.
 
 clear_deleteme_flag(Filename) ->
@@ -698,7 +709,7 @@ get_segments_to_merge(Segments) ->
         {Size, X}
     end,
     SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
-    
+
     %% Calculate the average...
     Avg = lists:sum([Size || {Size, _} <- SortedSizedSegments]) div length(Segments) + 1024,
 
