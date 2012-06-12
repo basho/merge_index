@@ -1,9 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% mi_locks: functional locking structure, used to make
-%%           segment and buffer locking more convient.
-%%
-%% Copyright (c) 2007-2011 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2007-2012 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -21,15 +18,19 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @odc A functional locking structure, used to make segment and
+%%      buffer locking more convient.
+
 -module(mi_locks).
 -include("merge_index.hrl").
 -author("Rusty Klophaus <rusty@basho.com>").
 -export([
-    new/0,
-    claim/2,
-    release/2,
-    when_free/3
-]).
+         new/0,
+         claim/2,
+         claim_many/2,
+         release/2,
+         when_free/3
+        ]).
 
 -record(lock, {
     key,
@@ -38,6 +39,9 @@
 }).
 
 new() -> [].
+
+claim_many(Keys, Locks) ->
+    lists:foldl(fun claim/2, Locks, Keys).
 
 claim(Key, Locks) ->
     case lists:keyfind(Key, #lock.key, Locks) of
@@ -75,7 +79,7 @@ when_free(Key, Fun, Locks) ->
         #lock { count=0, funs=Funs } ->
             [X() || X <- [Fun|Funs]],
             lists:keydelete(Key, #lock.key, Locks);
-            
+
         Lock = #lock { funs=Funs} ->
             NewLock = Lock#lock { funs=[Fun|Funs] },
             lists:keystore(Key, #lock.key, Locks, NewLock)

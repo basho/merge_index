@@ -274,21 +274,9 @@ handle_call({info, Index, Field, Term}, _From, State) ->
     {reply, {ok, TotalCount}, State};
 
 handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
-    %% Get the IDs...
     #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
 
-    %% Add locks to all buffers...
-    F1 = fun(Buffer, Acc) ->
-                 mi_locks:claim(mi_buffer:filename(Buffer), Acc)
-         end,
-    NewLocks = lists:foldl(F1, Locks, Buffers),
-
-    %% Add locks to all segments...
-    F2 = fun(Segment, Acc) ->
-                 mi_locks:claim(mi_segment:filename(Segment), Acc)
-         end,
-    NewLocks1 = lists:foldl(F2, NewLocks, Segments),
-
+    NewLocks = lock_all(Locks, Buffers, Segments),
     LPid = spawn_link(?MODULE, lookup,
                       [Index, Field, Term, Filter, Pid, Ref,
                        Buffers, Segments]),
@@ -299,25 +287,13 @@ handle_call({lookup, Index, Field, Term, Filter, Pid, Ref}, _From, State) ->
                               buffers=Buffers,
                               segments=Segments}
                 | State#state.lookup_range_pids ],
-    {reply, ok, State#state { locks=NewLocks1,
-                              lookup_range_pids=NewPids }};
+    {reply, ok, State#state { locks=NewLocks, lookup_range_pids=NewPids }};
 
 handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
             _From, State) ->
     #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
 
-    %% Add locks to all buffers...
-    F1 = fun(Buffer, Acc) ->
-                 mi_locks:claim(mi_buffer:filename(Buffer), Acc)
-         end,
-    NewLocks = lists:foldl(F1, Locks, Buffers),
-
-    %% Add locks to all segments...
-    F2 = fun(Segment, Acc) ->
-                 mi_locks:claim(mi_segment:filename(Segment), Acc)
-         end,
-    NewLocks1 = lists:foldl(F2, NewLocks, Segments),
-
+    NewLocks = lock_all(Locks, Buffers, Segments),
     RPid = spawn_link(?MODULE, range,
                       [Index, Field, StartTerm, EndTerm, Size, Filter,
                        Pid, Ref, Buffers, Segments]),
@@ -328,8 +304,7 @@ handle_call({range, Index, Field, StartTerm, EndTerm, Size, Filter, Pid, Ref},
                               buffers=Buffers,
                               segments=Segments}
                 | State#state.lookup_range_pids ],
-    {reply, ok, State#state { locks=NewLocks1,
-                              lookup_range_pids=NewPids }};
+    {reply, ok, State#state { locks=NewLocks, lookup_range_pids=NewPids }};
 
 %% NOTE: The order in which fold returns postings is not deterministic
 %% and is determined by things such as buffer_rollover_size.
@@ -381,22 +356,9 @@ handle_call(is_empty, _From, State) ->
 handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
     #state { locks=Locks, buffers=Buffers, segments=Segments } = State,
 
-    %% lock the buffers + segments so that they are not deleted while
-    %% being iterated
-    F1 = fun(Buffer, Acc) ->
-                 mi_locks:claim(mi_buffer:filename(Buffer), Acc)
-         end,
-    NewLocks = lists:foldl(F1, Locks, Buffers),
-
-    F2 = fun(Segment, Acc) ->
-                 mi_locks:claim(mi_segment:filename(Segment), Acc)
-         end,
-    NewLocks1 = lists:foldl(F2, NewLocks, Segments),
+    NewLocks = lock_all(Locks, Buffers, Segments),
 
     %% build ordered iterator over all buffers + segments
-    %%
-    %% TODO: maybe don't bother with order here since this is for
-    %% repair?
     BufferItrs = [mi_buffer:iterator(B) || B <- Buffers],
     SegmentItrs = [mi_segment:iterator(S) || S <- Segments],
     Itr = build_iterator_tree(BufferItrs ++ SegmentItrs),
@@ -411,7 +373,7 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
                               segments=Segments}
                 | State#state.lookup_range_pids ],
 
-    State2 = State#state{locks=NewLocks1, lookup_range_pids=NewPids},
+    State2 = State#state{locks=NewLocks, lookup_range_pids=NewPids},
     {reply, {ok, Itr}, State2};
 
 %% TODO what about resetting next_id?
@@ -806,3 +768,14 @@ next_buffer_to_convert(Buffers) ->
             end;
         empty -> {none, Buffers}
     end.
+
+buffer_filenames(Buffers) ->
+    [mi_buffer:filename(Buffer) || Buffer <- Buffers].
+
+segment_filenames(Segments) ->
+    [mi_segment:filename(Segment) || Segment <- Segments].
+
+lock_all(Locks, Buffers, Segments) ->
+    BufferNames = buffer_filenames(Buffers),
+    SegmentNames = segment_filenames(Segments),
+    mi_locks:claim_many(BufferNames ++ SegmentNames, Locks).
