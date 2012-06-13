@@ -86,7 +86,7 @@ info(Server, Index, Field, Term) -> mi_server:info(Server, Index, Field, Term).
 -spec iterator(pid(), function()) -> Iterator::iterator().
 iterator(Server, Filter) ->
     {ok, Ref} = mi_server:iterator(Server, Filter),
-    make_result_iterator(Ref).
+    make_result_iterator_bp(Ref).
 
 %% @doc Lookup the results for IFT and return an iterator.  This
 %% allows the caller to process data as it comes in/wants it.
@@ -202,6 +202,30 @@ result_iterator(Ref) ->
         ?LOOKUP_TIMEOUT ->
             throw(lookup_timeout)
     end.
+
+%% @private
+%%
+%% @doc Make an iterator with back pressure.
+make_result_iterator_bp(Ref) ->
+    fun() -> result_iterator_bp(Ref) end.
+
+%% @private
+result_iterator_bp(Ref) ->
+    receive
+        {results, Results, Ref} ->
+            {Results, fun() -> result_iterator_bp(Ref) end};
+        {waiting, From, Ref} ->
+            From ! {continue, Ref},
+            result_iterator_bp(Ref);
+        {eof, Ref} ->
+            eof;
+        {error, Ref, Reason} ->
+            {error, Reason}
+    after
+        ?LOOKUP_TIMEOUT ->
+            throw(lookup_timeout)
+    end.
+
 
 %% @private
 make_result_list(Ref) ->

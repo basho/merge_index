@@ -363,7 +363,7 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
     SegmentItrs = [mi_segment:iterator(S) || S <- Segments],
     Itr = build_iterator_tree(BufferItrs ++ SegmentItrs),
 
-    Args = [Filter, DestPid, DestRef, Itr(), []],
+    Args = [Filter, DestPid, DestRef, Itr(), {[], 0}],
     ItrPid = spawn_link(?MODULE, iterate2, Args),
 
     NewPids = [ #stream_range{pid=ItrPid,
@@ -671,20 +671,29 @@ iterate(_, Pid, Ref, _, eof, Acc) ->
 %%
 %% Don't check if deleted because tombstones need to be replicate or
 %% else indexes will reappear when they shouldn't.
-iterate2(_Filter, Pid, Ref, Iterator, Acc)
-  when length(Acc) > ?RESULTVEC_SIZE ->
-    Pid ! {results, lists:reverse(Acc), Ref},
-    iterate2(_Filter, Pid, Ref, Iterator, []);
-iterate2(Filter, _Pid, _Ref, {{I, F, T, Value, TS, Props}, Iter}, Acc) ->
+iterate2(_Filter, Pid, Ref, _Iterator, {_Results, 4}) ->
+    Pid ! {waiting, self(), Ref},
+    receive
+        {continue, Ref} ->
+            iterate2(_Filter, Pid, Ref, _Iterator, {_Results, 0})
+    after 60000 ->
+            throw({error, iterate2, timeout_waiting_for_continue})
+    end;
+iterate2(_Filter, Pid, Ref, Iterator, {Results, MsgCount})
+  when length(Results) > ?RESULTVEC_SIZE ->
+    Pid ! {results, lists:reverse(Results), Ref},
+    iterate2(_Filter, Pid, Ref, Iterator, {[], MsgCount+1});
+iterate2(Filter, _Pid, _Ref, {{I, F, T, Value, TS, Props}, Iter},
+         {Results, _MsgCount}) ->
     case Filter(Value, Props) of
         true  ->
             V = {I, F, T, Value, -1 * TS, Props},
-            iterate2(Filter, _Pid, _Ref, Iter(), [V|Acc]);
+            iterate2(Filter, _Pid, _Ref, Iter(), {[V|Results], _MsgCount});
         false ->
-            iterate2(Filter, _Pid, _Ref, Iter(), Acc)
+            iterate2(Filter, _Pid, _Ref, Iter(), {Results, _MsgCount})
     end;
-iterate2(_, Pid, Ref, eof, Acc) ->
-    Pid ! {results, lists:reverse(Acc), Ref},
+iterate2(_, Pid, Ref, eof, {Results, _MsgCount}) ->
+    Pid ! {results, lists:reverse(Results), Ref},
     ok.
 
 %% Chain a list of iterators into what looks like one single
