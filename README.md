@@ -1,5 +1,7 @@
 # Overview
 
+[![Build Status](https://secure.travis-ci.org/basho/merge_index.png?branch=master)](http://travis-ci.org/basho/merge_index)
+
 MergeIndex is an Erlang library for storing ordered sets on
 disk. It is very similar to an SSTable (in Google's
 Bigtable) or an HFile (in Hadoop).
