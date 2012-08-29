@@ -1,0 +1,106 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+
+-include_lib("kernel/include/file.hrl").
+-compile(export_all).
+-define(LOG(S), io:format(S)).
+-define(LOG(S,A), io:format(S,A)).
+
+main(Dirs) ->
+    CodePath = case os:getenv("RIAK_LIB") of
+                   false -> throw("RIAK_LIB must be set");
+                   Val -> filelib:wildcard(filename:join([Val, "*/ebin"]))
+               end,
+    ?LOG("CodePath: ~p~n", [CodePath]),
+    code:add_paths(CodePath),
+    code:ensure_loaded(mi_segment),
+    case code:is_loaded(mi_segment) of
+        false -> throw("Could not load mi_segment");
+        _ -> ok
+    end,
+    application:load(merge_index),
+    [detect_bad_files(D) || D <- Dirs];
+main(_) ->
+    usage().
+
+usage() ->
+    io:format("usage: detect-bad-files <code-path> <mi-root-dir>~n").
+
+detect_bad_files(Dir) ->
+    detect_bad_buffers(Dir),
+    detect_unmatched_segs(Dir),
+    detect_bad_seg_offsets(Dir),
+    detect_bad_segs(Dir).
+
+detect_bad_buffers(Dir) ->
+    ?LOG("Checking for bad buffers...~n"),
+    Buffs = file_glob(Dir, "buffer*"),
+    [check_buffer(B) || B <- Buffs].
+
+check_buffer(Buff) ->
+    try
+        mi_buffer:new(Buff)
+    catch _:Reason ->
+            ?LOG("BAD_BUFFER_DETECTED: ~p~n~p~n~p~n",
+                 [Buff, Reason, erlang:get_stacktrace()])
+    end.
+
+detect_unmatched_segs(Dir) ->
+    ?LOG("Checking for unmatched segments...~n"),
+    Offsets = file_glob(Dir, "*.offsets"),
+    Segs = file_glob(Dir, "*.data"),
+    Offsets2 = ordsets:from_list([offset_clean(O) || O <- Offsets]),
+    Segs2 = ordsets:from_list([seg_clean(S) || S <- Segs]),
+    MissingSegs = ordsets:subtract(Offsets2, Segs2),
+    MissingOffsets = ordsets:subtract(Segs2, Offsets2),
+    [missing_seg(S) || S <-  MissingSegs],
+    [missing_offset(O) || O <- MissingOffsets].
+
+offset_clean(OffsetFile) ->
+    filename:basename(OffsetFile, ".offsets").
+
+seg_clean(SegFile) ->
+    filename:basename(SegFile, ".data").
+
+missing_seg(Seg) ->
+    ?LOG("MISSING_SEGMENT: ~p~n", [Seg]).
+
+missing_offset(Offset) ->
+    ?LOG("MISSING_SEGMENT_OFFSET: ~p~n", [Offset]).
+
+detect_bad_seg_offsets(Dir) ->
+    ?LOG("Checking for bad offsets...~n"),
+    Offsets = file_glob(Dir, "*.offsets"),
+    [check_offset(O) || O <- Offsets].
+
+check_offset(Offset) ->
+    try
+        ets:file2tab(Offset)
+    catch _:Reason ->
+            ?LOG("BAD_SEGMENT_OFFSET: ~p~n~p~n~p~n",
+                 [Offset, Reason, erlang:get_stacktrace()])
+    end.
+
+detect_bad_segs(Dir) ->
+    ?LOG("Checking for bad segments...~n"),
+    Segs = file_glob(Dir, "*.data"),
+    [check_seg(S) || S <- Segs].
+
+check_seg(Seg) ->
+    try
+        {ok, FileInfo} = file:read_file_info(Seg),
+        Seg2 = {segment, filename:rootname(Seg), dummy_offset_tab, FileInfo#file_info.size},
+        Itr = mi_segment:iterator(Seg2),
+        iterate(Itr())
+    catch _:Reason ->
+            ?LOG("BAD_SEGMENT: ~p~n~p~n~p~n",
+                 [Seg, Reason, erlang:get_stacktrace()])
+    end.
+
+iterate(eof) ->
+    ok;
+iterate({_,Itr}) ->
+    iterate(Itr()).
+
+file_glob(Dir, Glob) ->
+    filelib:wildcard(filename:join([Dir, Glob])).
