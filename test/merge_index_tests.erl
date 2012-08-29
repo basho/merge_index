@@ -35,7 +35,7 @@
 prop_api_test_() ->
     {timeout, 600,
      fun() ->
-            ?assert(eqc:quickcheck(eqc:numtests(300,?QC_OUT(prop_api()))))
+            ?assert(eqc:quickcheck(eqc:numtests(1000,?QC_OUT(prop_api()))))
      end
     }.
 
@@ -48,8 +48,8 @@ prop_api() ->
 
     %% Comment out following lines to see error reports...otherwise
     %% it's too much noise
-    error_logger:delete_report_handler(sasl_report_tty_h),
-    lager:set_loglevel(lager_console_backend, critical),
+    %% error_logger:delete_report_handler(sasl_report_tty_h),
+    %% lager:set_loglevel(lager_console_backend, critical),
 
     ?FORALL(Cmds, commands(?MODULE),
             ?TRAPEXIT(
@@ -99,7 +99,8 @@ command(S) ->
            %% TODO don't hardcode size to 'all'
            {call,?MODULE,range, [P, g_range_query(Postings), all]},
            {call,?MODULE,range_sync, [P, g_range_query(Postings), all]},
-           {call,?MODULE,drop, [P]},
+           {call,?MODULE,iterator, [P]},
+           %% {call,?MODULE,drop, [P]},
            {call,?MODULE,compact, [P]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->
@@ -148,6 +149,12 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
                 lists:member(E, Postings2)
         end,
     ok == ?assert(lists:all(P,V2));
+
+postcondition(#state{postings=Postings}, {call,_,iterator,_}, {ok, V}) ->
+    V2 = lists:sort(iterate(V)),
+    Postings2 = lists:sort(Postings),
+    P = fun(E) -> lists:member(E, Postings2) end,
+    ok == ?assert(lists:all(P, V2));
 
 postcondition(#state{postings=Postings},
               {call,_,lookup,[_,{I,F,T,_,_,_}]}, V) ->
@@ -317,6 +324,10 @@ range(Pid, {I, F, ST, ET}, Size) ->
 range_sync(Pid, {I, F, ST, ET}, Size) ->
     Ft = fun(_,_) -> true end,
     merge_index:range_sync(Pid, I, F, ST, ET, Size, Ft).
+
+iterator(Pid) ->
+    Ft = fun(_,_) -> true end,
+    merge_index:iterator(Pid, Ft).
 
 drop(Pid) ->
     merge_index:drop(Pid).
