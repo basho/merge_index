@@ -28,6 +28,16 @@
 -include_lib("eqc/include/eqc_statem.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
+-define(E(Name, Expected, Actual),
+        case Expected == Actual of
+            true -> true;
+            false -> {Name, Expected, Actual}
+        end).
+-define(C(Name, Cond),
+        case Cond of
+            true -> true;
+            false -> {Name, ??Cond}
+        end).
 
 -record(state, {server_pid,
                 postings=[]}).
@@ -48,8 +58,8 @@ prop_api() ->
 
     %% Comment out following lines to see error reports...otherwise
     %% it's too much noise
-    %% error_logger:delete_report_handler(sasl_report_tty_h),
-    %% lager:set_loglevel(lager_console_backend, critical),
+    error_logger:delete_report_handler(sasl_report_tty_h),
+    lager:set_loglevel(lager_console_backend, critical),
 
     ?FORALL(Cmds, resize(50, commands(?MODULE)),
             ?TRAPEXIT(
@@ -121,11 +131,11 @@ precondition(_,_) ->
 
 postcondition(S, {call,_,is_empty,_}, V) ->
     case S#state.postings of
-        [] -> ok == ?assertEqual(true, V);
-        _ -> ok == ?assertEqual(false, V)
+        [] -> ?E(is_empty, true, V);
+        _ -> ?E(is_empty, false, V)
     end;
 postcondition(_, {call,_,index,_}, V) ->
-    ok == ?assertEqual(ok, V);
+    ?E(index, ok, V);
 postcondition(#state{postings=Postings}, {call,_,info,[_,{I,F,T,_,_,_}]}, V) ->
     Strip = [{Ii,Ff,Tt,Vv} || {Ii,Ff,Tt,Vv} <- Postings],
     Uniq = ordsets:to_list(ordsets:from_list(Strip)),
@@ -135,7 +145,7 @@ postcondition(#state{postings=Postings}, {call,_,info,[_,{I,F,T,_,_,_}]}, V) ->
 
     %% Assert that the weight is _greater than or equal_ b/c the
     %% bloom filter could cause false positives.
-    ok == ?assert(W >= length(L));
+    ?C(info, W >= length(L));
 postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     %% NOTE: The order in which fold returns postings is not
     %% deterministic.
@@ -148,13 +158,13 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
     P = fun(E) ->
                 lists:member(E, Postings2)
         end,
-    ok == ?assert(lists:all(P,V2));
+    ?C(fold, lists:all(P,V2));
 
-postcondition(#state{postings=Postings}, {call,_,iterator,_}, {ok, V}) ->
+postcondition(#state{postings=Postings}, {call,_,iterator,_}, V) ->
     V2 = lists:sort(iterate(V)),
     Postings2 = lists:sort(Postings),
     P = fun(E) -> lists:member(E, Postings2) end,
-    ok == ?assert(lists:all(P, V2));
+    ?C(iterator, lists:all(P, V2));
 
 postcondition(#state{postings=Postings},
               {call,_,lookup,[_,{I,F,T,_,_,_}]}, V) ->
@@ -166,7 +176,7 @@ postcondition(#state{postings=Postings},
                    (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
     V2 = [{Val,ignore} || {Val,_} <- lists:sort(iterate(V))],
-    ok == ?assertEqual(L3, V2);
+    ?E(lookup, L3, V2);
 
 postcondition(#state{postings=Postings},
               {call,_,lookup_sync,[_,{I,F,T,_,_,_}]}, V) ->
@@ -178,7 +188,7 @@ postcondition(#state{postings=Postings},
                    (I == Ii) andalso (F == Ff) andalso (T == Tt)],
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
     V2 = [{Val,ignore} || {Val,_} <- lists:sort(V)],
-    ok == ?assertEqual(L3, V2);
+    ?E(lookup_sync, L3, V2);
 
 postcondition(#state{postings=Postings},
               {call,_,range,[_,{I,F,ST,ET},all]}, V) ->
@@ -194,7 +204,7 @@ postcondition(#state{postings=Postings},
 
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
     V2 = [{Val,ignore} || {Val,_} <- lists:sort(iterate(V))],
-    ok == ?assertEqual(L3, V2);
+    ?E(range, L3, V2);
 
 postcondition(#state{postings=Postings},
               {call,_,range_sync,[_,{I,F,ST,ET},all]}, V) ->
@@ -211,13 +221,21 @@ postcondition(#state{postings=Postings},
     %% L3 = lists:sort((ordsets:from_list(L2)),
     L3 = lists:foldl(fun unique_vals/2, [], lists:sort(L2)),
     V2 = [{Val,ignore} || {Val,_} <- lists:sort(V)],
-    ok == ?assertEqual(L3, V2);
+    ?E(range_sync, L3, V2);
+
 postcondition(#state{postings=[]}, {call,_,drop,_}, V) ->
-    ok == ?assertEqual(ok, V);
+    ?E(drop, ok, V);
+
 postcondition(_, {call,_,compact,[_]}, V) ->
     {Msg, _SegsCompacted, _BytesCompacted} = V,
-    ok == ?assertEqual(ok, Msg);
-postcondition(_,_,_) -> true.
+    ?E(compact, ok, Msg);
+
+postcondition(_, {call,_,F,_}, V) when F == init;
+                                       F == drop ->
+    true;
+
+postcondition(_,Call,_) ->
+    {unknown_postcondition, Call}.
 
 %% ====================================================================
 %% generators
