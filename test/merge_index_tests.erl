@@ -51,7 +51,7 @@ prop_api() ->
     %% error_logger:delete_report_handler(sasl_report_tty_h),
     %% lager:set_loglevel(lager_console_backend, critical),
 
-    ?FORALL(Cmds, commands(?MODULE),
+    ?FORALL(Cmds, resize(40,commands(?MODULE)),
             ?TRAPEXIT(
                begin
                    application:stop(merge_index),
@@ -100,7 +100,7 @@ command(S) ->
            {call,?MODULE,range, [P, g_range_query(Postings), all]},
            {call,?MODULE,range_sync, [P, g_range_query(Postings), all]},
            {call,?MODULE,iterator, [P]},
-           %% {call,?MODULE,drop, [P]},
+           {call,?MODULE,drop, [P]},
            {call,?MODULE,compact, [P]}]).
 
 next_state(S, Pid, {call,_,init,_}) ->

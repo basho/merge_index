@@ -65,6 +65,7 @@ release(Key, Locks) ->
             lists:keystore(Key, #lock.key, Locks, NewLock);
 
         false ->
+            lager:error("couldn't release key ~p in ~p", [Key, Locks]),
             throw({lock_does_not_exist, Key})
     end.
 

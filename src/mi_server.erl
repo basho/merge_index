@@ -71,7 +71,8 @@
           caller,
           ref,
           buffers,
-          segments
+          segments,
+          tag=fooey
          }).
 
 -define(RESULTVEC_SIZE, 1000).
@@ -363,14 +364,16 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
     SegmentItrs = [mi_segment:iterator(S) || S <- Segments],
     Itr = build_iterator_tree(BufferItrs ++ SegmentItrs),
 
-    Args = [Filter, DestPid, DestRef, Itr(), {[], 0}],
-    ItrPid = spawn_link(?MODULE, iterate2, Args),
+    ItrPid = spawn_link(
+               fun() -> iterate2(Filter, DestPid, DestRef, Itr(), {[], 0}) end
+              ),
 
     NewPids = [ #stream_range{pid=ItrPid,
                               caller=DestPid,
                               ref=DestRef,
                               buffers=Buffers,
-                              segments=Segments}
+                              segments=Segments,
+                              tag=iterator}
                 | State#state.lookup_range_pids ],
 
     State2 = State#state{locks=NewLocks, lookup_range_pids=NewPids},
@@ -379,6 +382,7 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
 %% TODO what about resetting next_id?
 handle_call(drop, _From, State) ->
     #state { buffers=Buffers, segments=Segments } = State,
+    %% lager:info("A drop was called buffers: ~p segments: ~p", [Buffers, Segments]),
 
     %% Delete files, reset state...
     [mi_buffer:delete(X) || X <- Buffers],
@@ -389,6 +393,7 @@ handle_call(drop, _From, State) ->
                              buffers = [Buffer],
                              segments = [],
                              converter = undefined,
+                             lookup_range_pids = [],
                              to_convert = queue:new()},
     {reply, ok, NewState};
 
@@ -511,9 +516,15 @@ handle_info({'EXIT', CompactingPid, Reason},
 handle_info({'EXIT', Pid, Reason},
             #state{lookup_range_pids=SRPids}=State) ->
 
+    try
     case lists:keytake(Pid, #stream_range.pid, SRPids) of
         {value, SR, NewSRPids} ->
             %% One of our lookup or range processes exited
+            %% if SR#stream_range.tag == iterator ->
+            %%         lager:info("An iterator pid exited ~p with reason ~p", [SR, Reason]);
+            %%    true ->
+            %%         ok
+            %% end,
 
             case Reason of
                 normal ->
@@ -537,13 +548,17 @@ handle_info({'EXIT', Pid, Reason},
             end,
             NewLocks1 = lists:foldl(F2, NewLocks,
                                    SR#stream_range.segments),
-
             {noreply, State#state { locks=NewLocks1,
                                     lookup_range_pids=NewSRPids }};
         false ->
             %% some random other process exited: ignore
             {noreply, State}
-    end;
+    end
+            catch _:Reason ->
+                    lager:error("caught reason: ~p~ntrace: ~p", [Reason, erlang:get_stacktrace()])
+            end;
+
+
 
 handle_info(Msg, State) ->
     lager:error("Unexpected info ~p", [Msg]),

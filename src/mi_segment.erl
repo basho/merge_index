@@ -154,8 +154,12 @@ iterator(Segment) ->
         false ->
             %% Open a filehandle to the start of the segment.
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_compact_read_ahead_size),
-            {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
-            fun() -> iterate_all_filehandle(FH, undefined, undefined) end
+
+            fun() ->
+                    {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
+
+                    iterate_all_filehandle(FH, undefined, undefined)
+            end
     end.
 
 %% @private Create an iterator over a binary which represents the
