@@ -363,8 +363,10 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
     SegmentItrs = [mi_segment:iterator(S) || S <- Segments],
     Itr = build_iterator_tree(BufferItrs ++ SegmentItrs),
 
-    Args = [Filter, DestPid, DestRef, Itr(), {[], 0}],
-    ItrPid = spawn_link(?MODULE, iterate2, Args),
+    ItrPid = spawn_link(
+               fun() ->
+                       iterate2(Filter, DestPid, DestRef, Itr(), {[],0})
+               end),
 
     NewPids = [ #stream_range{pid=ItrPid,
                               caller=DestPid,

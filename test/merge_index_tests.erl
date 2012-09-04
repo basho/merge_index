@@ -99,6 +99,7 @@ command(S) ->
            %% TODO don't hardcode size to 'all'
            {call,?MODULE,range, [P, g_range_query(Postings), all]},
            {call,?MODULE,range_sync, [P, g_range_query(Postings), all]},
+           {call,?MODULE,iterator, [P]},
            {call,?MODULE,drop, [P]},
            {call,?MODULE,compact, [P]}]).
 
@@ -148,6 +149,13 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
                 lists:member(E, Postings2)
         end,
     ok == ?assert(lists:all(P,V2));
+
+postcondition(#state{postings=Postings}, {call,_,iterator,_}, V) ->
+    V2 = lists:sort(iterate(V)),
+    Postings2 = [{Ii,Ff,Tt,Vv,TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings],
+    Postings3 = lists:sort(Postings2),
+    P = fun(E) -> lists:member(E, Postings3) end,
+    ok == ?assert(lists:all(P, V2));
 
 postcondition(#state{postings=Postings},
               {call,_,lookup,[_,{I,F,T,_,_,_}]}, V) ->
@@ -298,6 +306,10 @@ info(Pid, {I,F,T,_,_,_}) ->
 
 is_empty(Pid) ->
     merge_index:is_empty(Pid).
+
+iterator(Pid) ->
+    Ft = fun(_,_) -> true end,
+    merge_index:iterator(Pid, Ft).
 
 fold(Pid, Fun, Acc) ->
     merge_index:fold(Pid, Fun, Acc).
