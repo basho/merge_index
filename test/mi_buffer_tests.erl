@@ -19,9 +19,9 @@
 %% -------------------------------------------------------------------
 
 -module(mi_buffer_tests).
--import(common, [g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1, g_value/0,
+-import(common, [entries/0, g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1, g_value/0,
                  g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
-                 unique_latest/2, test_spec/2]).
+                 unique_latest/2, test_spec/2, test_spec/3]).
 
 -ifdef(EQC).
 
@@ -102,13 +102,34 @@ check_count(Root, Entries, IFT) ->
     mi_buffer:delete(Buffer),
     equals(C1, C2).
 
+prop_corruption_test(Root) ->
+    ?LET(Entries, entries(),
+         begin
+             BufName = Root ++ "_buffer",
+             Buffer = mi_buffer:write(Entries, mi_buffer:new(BufName)),
+             Filename = mi_buffer:filename(Buffer),
+             Tab = element(4, Buffer),
+             ets:delete(Tab),
+             mi_buffer:close_filehandle(Buffer),
+             {ok, Bin} = file:read_file(Filename),
+             Size = size(Bin),
+             ?FORALL({Pos,RandomByte}, {choose(1, Size-1), binary(1)},
+                     begin
+                         BeforePos = Pos - 1,
+                         <<Before:BeforePos/binary,_:1/binary,After/binary>> = Bin,
+                         Bin2 = <<Before/binary,RandomByte/binary,After/binary>>,
+                         ok = file:write_file(Filename, Bin2),
+                         _ = mi_buffer:new(BufName)
+                     end)
+         end).
+
 prop_truncation_test(Root) ->
     ?LET(Entries,
          non_empty(list({g_ift(), g_value(), g_tstamp(), g_props()})),
          begin
              try
                  Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
-                 BufferLen = mi_buffer:filesize(Buffer),                 
+                 BufferLen = mi_buffer:filesize(Buffer),
                  ?FORALL(TruncateBy,
                          choose(1, BufferLen-1), check_truncation(Buffer, Entries, TruncateBy))
               after
@@ -147,5 +168,8 @@ prop_info_test_() ->
 
 prop_truncation_test_() ->
     test_spec("/tmp/test/mi_buffer_truncation", fun prop_truncation_test/1).
+
+prop_corruption_test_() ->
+    test_spec("/tmp/test/mi_buffer_corruption", fun prop_corruption_test/1).
 
 -endif.
