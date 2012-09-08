@@ -52,7 +52,7 @@ start() ->
 
 schedule_compaction(Pid) ->
     gen_server:call(?MODULE, {schedule_compaction, Pid}, infinity).
-    
+
 
 %% ====================================================================
 %% gen_server callbacks
@@ -123,9 +123,9 @@ worker_loop(Parent) ->
     Parent ! {worker_ready, self()},
     receive
         {compaction, Pid} ->
-            Start = now(),
+            Start = os:timestamp(),
             Result = merge_index:compact(Pid),
-            ElapsedSecs = timer:now_diff(now(), Start) / 1000000,
+            ElapsedSecs = timer:now_diff(os:timestamp(), Start) / 1000000,
             case Result of
                 {ok, OldSegments, OldBytes} ->
                     case ElapsedSecs > 1 of
@@ -147,4 +147,3 @@ worker_loop(Parent) ->
     after 1000 ->
             ?MODULE:worker_loop(Parent)
     end.
-
