@@ -363,8 +363,13 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
     SegmentItrs = [mi_segment:iterator(S) || S <- Segments],
     Itr = build_iterator_tree(BufferItrs ++ SegmentItrs),
 
-    Args = [Filter, DestPid, DestRef, Itr(), {[], 0}],
-    ItrPid = spawn_link(?MODULE, iterate2, Args),
+    %% Args = [Filter, DestPid, DestRef, Itr(), {[], 0}],
+    %% ItrPid = spawn_link(?MODULE, iterate2, Args),
+
+    ItrPid = spawn_link(
+               fun() ->
+                       iterate2_start(Filter, DestPid, DestRef, Itr, {[], 0})
+               end),
 
     NewPids = [ #stream_range{pid=ItrPid,
                               caller=DestPid,
@@ -389,7 +394,8 @@ handle_call(drop, _From, State) ->
                              buffers = [Buffer],
                              segments = [],
                              converter = undefined,
-                             to_convert = queue:new()},
+                             to_convert = queue:new(),
+                             lookup_range_pids = []},
     {reply, ok, NewState};
 
 handle_call(stop, _From, State) ->
@@ -661,6 +667,9 @@ iterate(Filter, _Pid, _Ref, LastValue,
 iterate(_, Pid, Ref, _, eof, Acc) ->
     Pid ! {results, lists:reverse(Acc), Ref},
     ok.
+
+iterate2_start(Filter, Pid, Ref, Itr, Acc) ->
+    iterate2(Filter, Pid, Ref, Itr(), Acc).
 
 %% This is currently a copy/paste of iterate with specific changes
 %% noted below.
