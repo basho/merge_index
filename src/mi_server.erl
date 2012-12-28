@@ -235,7 +235,8 @@ handle_call(start_compaction, From, State) ->
     %% optimized with tuning, but probably a good enough solution.
     Segments = State#state.segments,
     {ok, MaxSegments} = application:get_env(merge_index, max_compact_segments),
-    SegmentsToCompact = case get_segments_to_merge(Segments) of
+    {ok, {M,F}} = application:get_env(merge_index, compact_mod_fun),
+    SegmentsToCompact = case M:F(Segments) of
                             STC when length(STC) > MaxSegments ->
                                 lists:sublist(STC, MaxSegments);
                             STC ->
@@ -472,7 +473,8 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
                         },
 
             %% Give us the opportunity to do a merge...
-            SegmentsToMerge = get_segments_to_merge(NewSegments),
+            {ok, {M,F}} = application:get_env(merge_index, compact_mod_fun),
+            SegmentsToMerge = M:F(NewSegments),
             case length(SegmentsToMerge) of
                 Num when Num =< 2 orelse is_tuple(IsCompacting) ->
                     ok;
@@ -734,22 +736,6 @@ group_iterator(Iterator, eof) ->
 
 clear_deleteme_flag(Filename) ->
     file:delete(Filename ++ ?DELETEME_FLAG).
-
-%% Figure out which files to merge. Take the average of file sizes,
-%% return anything smaller than the average for merging.
-get_segments_to_merge(Segments) ->
-    %% Get all segment sizes...
-    F1 = fun(X) ->
-        Size = mi_segment:filesize(X),
-        {Size, X}
-    end,
-    SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
-
-    %% Calculate the average...
-    Avg = lists:sum([Size || {Size, _} <- SortedSizedSegments]) div length(Segments) + 1024,
-
-    %% Return segments less than average...
-    [Segment || {Size, Segment} <- SortedSizedSegments, Size < Avg].
 
 fold_itr(_Fun, Acc, eof) -> Acc;
 fold_itr(Fun, Acc, {Term, IteratorFun}) ->
