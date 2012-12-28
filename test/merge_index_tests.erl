@@ -38,6 +38,12 @@
             true -> true;
             false -> {Name, ??Cond}
         end).
+-define(C2(Name, Cond, Expected, Value),
+        case Cond of
+            true -> true;
+            false -> {Name, ??Cond, Expected, Value}
+        end).
+
 
 -record(state, {server_pid,
                 postings=[]}).
@@ -45,7 +51,7 @@
 prop_api_test_() ->
     {timeout, 600,
      fun() ->
-            ?assert(eqc:quickcheck(eqc:numtests(1000,?QC_OUT(prop_api()))))
+            ?assert(eqc:quickcheck(eqc:numtests(50,?QC_OUT(prop_api()))))
      end
     }.
 
@@ -61,7 +67,7 @@ prop_api() ->
     error_logger:delete_report_handler(sasl_report_tty_h),
     lager:set_loglevel(lager_console_backend, critical),
 
-    ?FORALL(Cmds, resize(50, commands(?MODULE)),
+    ?FORALL(Cmds, resize(600, commands(?MODULE)),
             ?TRAPEXIT(
                begin
                    application:stop(merge_index),
@@ -162,9 +168,10 @@ postcondition(#state{postings=Postings}, {call,_,fold,_}, {ok, V}) ->
 
 postcondition(#state{postings=Postings}, {call,_,iterator,_}, V) ->
     V2 = lists:sort(iterate(V)),
-    Postings2 = lists:sort(Postings),
-    P = fun(E) -> lists:member(E, Postings2) end,
-    ?C(iterator, lists:all(P, V2));
+    Postings2 = [{Ii,Ff,Tt,Vv,TS,P} || {Ii,Ff,Tt,Vv,P,TS} <- Postings],
+    Postings3 = lists:sort(Postings2),
+    P = fun(E) -> lists:member(E, Postings3) end,
+    ?C2(iterator, lists:all(P, V2), Postings3, V2);
 
 postcondition(#state{postings=Postings},
               {call,_,lookup,[_,{I,F,T,_,_,_}]}, V) ->
