@@ -29,6 +29,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
 
+-define(I, <<"index">>).
+-define(F, <<"field">>).
+
 -record(state, {server_pid,
                 postings=[]}).
 
@@ -65,8 +68,10 @@ prop_api() ->
                    end,
 
                    case Res of
-                       ok -> ok;
-                       _ -> io:format(user,
+                       ok ->
+                           ok;
+                       _ ->
+                           io:format(user,
                                       "QC Commands: ~p~n"
                                       "QC History: ~p~n"
                                       "QC State: ~p~n"
@@ -91,11 +96,11 @@ command(S) ->
     Postings = S#state.postings,
     oneof([{call,?MODULE,index, [P, g_postings()]},
            {call,?MODULE,is_empty, [P]},
-           {call,?MODULE,info, [P, g_posting(Postings)]},
+           {call,?MODULE,info, [P, g_ift(Postings)]},
            {call,?MODULE,fold, [P, fun fold_fun/7, []]},
            %% TODO generate filter funs for lookup/range
-           {call,?MODULE,lookup, [P, g_posting(Postings)]},
-           {call,?MODULE,lookup_sync, [P, g_posting(Postings)]},
+           {call,?MODULE,lookup, [P, g_ift(Postings)]},
+           {call,?MODULE,lookup_sync, [P, g_ift(Postings)]},
            %% TODO don't hardcode size to 'all'
            {call,?MODULE,range, [P, g_range_query(Postings), all]},
            {call,?MODULE,range_sync, [P, g_range_query(Postings), all]},
@@ -240,10 +245,22 @@ g_pos_tstamp() -> elements([1,2,3,choose(0, ?POW_2(31))]).
 g_posting() ->
     {g_i(), g_f(), g_t(), g_value(), g_props(), g_pos_tstamp()}.
 
+g_ift() ->
+    frequency([{10, {?I, ?F, g_t()}},
+               {1, {g_i(), g_f(), g_t()}}]).
+
+g_ift(Postings) ->
+    case length(Postings) of
+        0 ->
+            g_ift();
+        _ ->
+            IFTs = [{I,F,T} || {I,F,T,_,_,_} <- Postings],
+            oneof([elements(IFTs),
+                   g_ift()])
+    end.
+
 g_postings() ->
-    I = <<"index">>,
-    F = <<"field">>,
-    list(frequency([{10, {I,F,g_t(),g_value(),g_props(),g_pos_tstamp()}},
+    list(frequency([{10, {?I,?F,g_t(),g_value(),g_props(),g_pos_tstamp()}},
                     {1, g_posting()}])).
 
 g_posting(Postings) ->
@@ -301,7 +318,7 @@ init([BRS,BDWS,BDWM,MCS,SQRAS,SCRAS,SFBSandSDWS,SDWM,SFRS,SBS,
 index(Pid, Postings) ->
     merge_index:index(Pid, Postings).
 
-info(Pid, {I,F,T,_,_,_}) ->
+info(Pid, {I,F,T}) ->
     merge_index:info(Pid, I, F, T).
 
 is_empty(Pid) ->
@@ -314,11 +331,11 @@ iterator(Pid) ->
 fold(Pid, Fun, Acc) ->
     merge_index:fold(Pid, Fun, Acc).
 
-lookup(Pid, {I,F,T,_,_,_}) ->
+lookup(Pid, {I,F,T}) ->
     Ft = fun(_,_) -> true end,
     merge_index:lookup(Pid, I, F, T, Ft).
 
-lookup_sync(Pid, {I,F,T,_,_,_}) ->
+lookup_sync(Pid, {I,F,T}) ->
     Ft = fun(_,_) -> true end,
     merge_index:lookup_sync(Pid, I, F, T, Ft).
 
