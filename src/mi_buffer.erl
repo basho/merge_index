@@ -69,11 +69,29 @@ new(Filename) ->
 open_inner(FH, Table, Filename) ->
     case read_value(FH, Filename) of
         {ok, Postings} ->
-            write_to_ets(Table, Postings),
+            try
+                write_to_ets(Table, Postings)
+            catch error:badarg ->
+                    %% This could also happen if ETS tab is gone, but
+                    %% assuming improper list caused by corruption.
+                    {ok, Pos} = file:position(FH, cur),
+                    Sz = erlang:size(Bin = term_to_binary(Postings)),
+                    StashFile = stash_corrupt(buffer, Filename, Bin),
+                    log_corruption(Filename, Pos, Sz, StashFile)
+            end,
             open_inner(FH, Table, Filename);
         eof ->
-            ok
+            ok;
+        {corrupt, {CurrPos, Size, B}} ->
+            StashFile = stash_corrupt(buffer, Filename, B),
+            log_corruption(Filename, CurrPos, Size, StashFile),
+            open_inner(FH, Table, Filename)
     end.
+
+stash_corrupt(buffer, Filename, CorruptedBinary) ->
+    StashFile = Filename ++ "-" ++ integer_to_list(element(3,now())),
+    file:write_file(StashFile, CorruptedBinary),
+    StashFile.
 
 filename(Buffer) -> Buffer#buffer.filename.
 
@@ -153,13 +171,20 @@ iterate_list([H|T]) ->
 %% Internal functions
 %% ===================================================================
 
+-spec read_value(term(), term()) -> {ok, term()} |
+                                    eof |
+                                    {corrupt, {integer(), integer(), binary()}}.
 read_value(FH, Filename) ->
     {ok, CurrPos} = file:position(FH, cur),
     case file:read(FH, 4) of
         {ok, <<Size:32/unsigned-integer>>} when Size > 0->
             case file:read(FH, Size) of
                 {ok, <<B:Size/binary>>} ->
-                    {ok, binary_to_term(B)};
+                    try
+                        {ok, binary_to_term(B)}
+                    catch error:badarg ->
+                            {corrupt, {CurrPos + 4, Size, B}}
+                    end;
                 _ ->
                     log_truncation(Filename, CurrPos),
                     file:position(FH, {bof, CurrPos}),
@@ -172,6 +197,11 @@ read_value(FH, Filename) ->
         eof ->
             eof
     end.
+
+log_corruption(Filename, StartPos, Size, StashFile) ->
+    lager:warning("Corrupted postings detected in ~s starting"
+                  " at offset ~w with size ~w, stashed in ~s",
+                  [Filename, StartPos, Size, StashFile]).
 
 log_truncation(Filename, Position) ->
     error_logger:warning_msg("Corrupted posting detected in ~s after reading ~w bytes, ignoring remainder.",
