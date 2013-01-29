@@ -378,7 +378,6 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
     State2 = State#state{locks=NewLocks, lookup_range_pids=NewPids},
     {reply, {ok, Itr}, State2};
 
-%% TODO what about resetting next_id?
 handle_call(drop, _From, State) ->
     #state{ buffers=Buffers,
             segments=Segments,
@@ -396,6 +395,7 @@ handle_call(drop, _From, State) ->
                              segments = [],
                              lookup_range_pids = [],
                              converter = undefined,
+                             next_id = 2,
                              to_convert = queue:new()},
     {reply, ok, NewState};
 
