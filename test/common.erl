@@ -27,6 +27,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
 
+entries() ->
+    non_empty(list({g_ift(), g_value(), g_tstamp(), g_props()})).
+
 g_i() -> elements([<<"i1">>,<<"i2">>,<<"i3">>,non_empty(binary())]).
 
 g_f() -> elements([<<"f1">>,<<"f2">>,<<"f3">>,non_empty(binary())]).
