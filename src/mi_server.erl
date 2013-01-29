@@ -380,7 +380,11 @@ handle_call({iterator, Filter, DestPid, DestRef}, _From, State) ->
 
 %% TODO what about resetting next_id?
 handle_call(drop, _From, State) ->
-    #state { buffers=Buffers, segments=Segments } = State,
+    #state{ buffers=Buffers,
+            segments=Segments,
+            lookup_range_pids=LRPids } = State,
+
+    [exit(P#stream_range.pid, dropped) || P <- LRPids],
 
     %% Delete files, reset state...
     [mi_buffer:delete(X) || X <- Buffers],
@@ -390,6 +394,7 @@ handle_call(drop, _From, State) ->
     NewState = State#state { locks = mi_locks:new(),
                              buffers = [Buffer],
                              segments = [],
+                             lookup_range_pids = [],
                              converter = undefined,
                              to_convert = queue:new()},
     {reply, ok, NewState};
