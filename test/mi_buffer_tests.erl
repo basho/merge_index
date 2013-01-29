@@ -102,10 +102,18 @@ check_count(Root, Entries, IFT) ->
     mi_buffer:delete(Buffer),
     equals(C1, C2).
 
+buffer_corruption_ce_test() ->
+    CE = common:get_ce("../counter-examples/buffer-corruption.eqc"),
+    ?assert(eqc:check(
+              prop_corruption_test("/tmp/test/mi_buffer_corruption_ce"), CE)).
+
 prop_corruption_test(Root) ->
     ?LET(Entries, entries(),
          begin
              BufName = Root ++ "_buffer",
+             CBufName = BufName ++ ".corrupted",
+             Dir = filename:dirname(Root),
+             ?assertCmd("rm -rf " ++ Dir ++ " && mkdir " ++ Dir),
              Buffer = mi_buffer:write(Entries, mi_buffer:new(BufName)),
              Filename = mi_buffer:filename(Buffer),
              Tab = element(4, Buffer),
@@ -113,13 +121,18 @@ prop_corruption_test(Root) ->
              mi_buffer:close_filehandle(Buffer),
              {ok, Bin} = file:read_file(Filename),
              Size = size(Bin),
-             ?FORALL({Pos, RandomByte}, {choose(1, Size-1), binary(1)},
+             %% Start at pos 5 to avoid always shrinking to truncation
+             %% detection (first 4 bytes are size of postings binary.
+             ?FORALL({Pos, RandomByte}, {choose(5, Size-1), binary(1)},
                      begin
                          BeforePos = Pos - 1,
                          <<Before:BeforePos/binary,_:1/binary,After/binary>> = Bin,
                          Bin2 = <<Before/binary,RandomByte/binary,After/binary>>,
-                         ok = file:write_file(Filename, Bin2),
-                         _ = mi_buffer:new(BufName)
+                         ok = file:write_file(CBufName, Bin2),
+
+                         %% As long as this doesn't error things are good
+                         _ = mi_buffer:new(CBufName),
+                         true
                      end)
          end).
 

@@ -27,6 +27,10 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
 
+get_ce(File) ->
+    {ok, Bin} = file:read_file(File),
+    binary_to_term(Bin).
+
 entries() ->
     non_empty(list({g_ift(), g_value(), g_tstamp(), g_props()})).
 

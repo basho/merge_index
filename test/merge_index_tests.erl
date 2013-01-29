@@ -36,7 +36,7 @@
                 postings=[]}).
 
 lock_doesnt_exist_ce_test() ->
-    CE = get_ce("../counter-examples/lock-does-not-exist.eqc"),
+    CE = common:get_ce("../counter-examples/lock-does-not-exist.eqc"),
     ?assert(eqc:check(?MODULE:prop_api(), CE)).
 
 prop_api_test_() ->
@@ -360,10 +360,6 @@ compact(Pid) ->
 %% ====================================================================
 %% helpers
 %% ====================================================================
-
-get_ce(File) ->
-    {ok, Bin} = file:read_file(File),
-    binary_to_term(Bin).
 
 set(Par, Val) ->
     application:set_env(merge_index, Par, Val).
