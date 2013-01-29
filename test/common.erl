@@ -44,7 +44,7 @@ g_ift_range(IFTs) ->
 g_value() -> elements([<<"v1">>,<<"v2">>,<<"v3">>,non_empty(binary())]).
 
 g_props() ->
-    elements([[{p, 1}], [{p, 2}],list({p, choose(0, ?POW_2(31))})]).
+    elements([[{p, 1}], [{p, 2}]]).%,list({p, choose(0, ?POW_2(31))})]).
 
 %% Generate inverted tstamps to match mi_server
 g_tstamp() ->
