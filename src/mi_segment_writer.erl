@@ -65,7 +65,6 @@
          }).
 
 from_iterator(Iterator, Segment) ->
-    %% Open the data file...
     {ok, DelayedWriteSize} = application:get_env(merge_index, segment_delayed_write_size),
     {ok, DelayedWriteMS} = application:get_env(merge_index, segment_delayed_write_ms),
     {ok, DataFile} = file:open(mi_segment:data_file(Segment), [write, raw, binary, {delayed_write, DelayedWriteSize, DelayedWriteMS}]),
@@ -126,8 +125,9 @@ from_iterator(eof, StartIFT, _LastValue, W) ->
     W2.
 
 
-%% One method below for each different stage of writing a segment: start_segment, start_block, start_term, value, end_term, end_block, end_segment.
-
+%% One method below for each different stage of writing a segment:
+%% start_segment, start_block, start_term, value, end_term, end_block,
+%% end_segment.
 from_iterator_process_start_segment(W) ->
     W.
 
@@ -155,7 +155,6 @@ from_iterator_process_start_term(Key, W) ->
             W2 = W
     end,
 
-    %% Write the key entry to the data file.
     from_iterator_write_key(W2, Key).
 
 from_iterator_process_value(Value, W) ->
