@@ -58,13 +58,10 @@ exists(Root) ->
 
 %% Create and return a new segment structure.
 open_read(Root) ->
-    %% Create the file if it doesn't exist...
     DataFileExists = filelib:is_file(data_file(Root)),
     case DataFileExists of
         true  ->
-            %% Get the fileinfo...
             {ok, FileInfo} = file:read_file_info(data_file(Root)),
-
             OffsetsTable = read_offsets(Root),
             lager:debug("opened segment '~s' for read", [Root]),
             #segment {
@@ -77,7 +74,6 @@ open_read(Root) ->
     end.
 
 open_write(Root) ->
-    %% Create the file if it doesn't exist...
     DataFileExists = filelib:is_file(data_file(Root)),
     OffsetsFileExists = filelib:is_file(offsets_file(Root)),
     case DataFileExists orelse OffsetsFileExists of
@@ -107,7 +103,6 @@ delete(Segment) ->
 
 %% Create a segment from a Buffer (see mi_buffer.erl)
 from_buffer(Buffer, Segment) ->
-    %% Open the iterator...
     Iterator = mi_buffer:iterator(Buffer),
     mi_segment_writer:from_iterator(Iterator, Segment).
 
@@ -313,7 +308,6 @@ iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm, Size,
                         IterateOverValues, ResultsAcc, IteratorsAcc) ->
     case read_seg_entry(File) of
         {key, ShrunkenKey} ->
-            %% Expand the possibly shrunken key...
             CurrKey = {I, F, T} = expand_key(BaseKey, ShrunkenKey),
 
             %% If the key is smaller than the one we need, keep
