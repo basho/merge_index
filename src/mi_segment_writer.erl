@@ -52,7 +52,7 @@
                  compressed_values=false,
                  buffer=[],
                  buffer_size=0,
-                 
+
                  %% We are caching these settings in the #writer state
                  %% to avoid looking them up repeatedly. This saves
                  %% quite a bit of time, as 100,000 lookups on my
@@ -81,21 +81,20 @@ from_iterator(Iterator, Segment) ->
     after
         file:close(W#writer.data_file),
         ets:delete(W#writer.offsets_table)
-    end,    
+    end,
     ok.
-    
 
 %% from_iterator_inner/4 - responsible for taking an iterator,
 %% removing duplicate values, and then calling the correct
 %% from_iterator_process_*/N functions, which should update the state variable.
-from_iterator({Entry, Iterator}, StartIFT, LastValue, W) 
+from_iterator({Entry, Iterator}, StartIFT, LastValue, W)
   when ?INDEX_FIELD_TERM(Entry) == StartIFT andalso
        ?VALUE(Entry) /= LastValue ->
     %% Add the next value to the segment.
     W1 = from_iterator_process_value(?VALUE_TSTAMP_PROPS(Entry), W),
     from_iterator(Iterator(), StartIFT, ?VALUE(Entry), W1);
 
-from_iterator({Entry, Iterator}, StartIFT, _LastValue, W) 
+from_iterator({Entry, Iterator}, StartIFT, _LastValue, W)
   when ?INDEX_FIELD_TERM(Entry) /= StartIFT andalso StartIFT /= undefined ->
     %% Start a new term.
     W1 = from_iterator_process_end_term(StartIFT, W),
@@ -103,7 +102,7 @@ from_iterator({Entry, Iterator}, StartIFT, _LastValue, W)
     W3 = from_iterator_process_value(?VALUE_TSTAMP_PROPS(Entry), W2),
     from_iterator(Iterator(), ?INDEX_FIELD_TERM(Entry), ?VALUE(Entry), W3);
 
-from_iterator({Entry, Iterator}, StartIFT, LastValue, W) 
+from_iterator({Entry, Iterator}, StartIFT, LastValue, W)
   when ?INDEX_FIELD_TERM(Entry) == StartIFT andalso
        ?VALUE(Entry) == LastValue ->
     %% Eliminate a duplicate value.
@@ -129,22 +128,22 @@ from_iterator(eof, StartIFT, _LastValue, W) ->
 
 %% One method below for each different stage of writing a segment: start_segment, start_block, start_term, value, end_term, end_block, end_segment.
 
-from_iterator_process_start_segment(W) -> 
+from_iterator_process_start_segment(W) ->
     W.
 
-from_iterator_process_start_block(W) -> 
+from_iterator_process_start_block(W) ->
     %% Set the block_start position, and zero out keys for this block..
     W#writer {
       block_start = W#writer.pos,
       keys = []
      }.
 
-from_iterator_process_start_term(Key, W) -> 
+from_iterator_process_start_term(Key, W) ->
     %% If the Index or Field value for this key is different from the
     %% last one, then close the last block and start a new block. This
     %% makes bookkeeping simpler all around.
     LastKey = W#writer.last_key,
-    ShouldStartBlock = 
+    ShouldStartBlock =
         LastKey == undefined orelse
         element(1, Key) /= element(1, LastKey) orelse
         element(2, Key) /= element(2, LastKey),
@@ -161,7 +160,7 @@ from_iterator_process_start_term(Key, W) ->
 
 from_iterator_process_value(Value, W) ->
     %% Build up the set of values...
-    W1 = W#writer { 
+    W1 = W#writer {
              values_staging=[Value|W#writer.values_staging],
              values_count = W#writer.values_count + 1
             },
@@ -170,14 +169,14 @@ from_iterator_process_value(Value, W) ->
     %% which may or may not compress them and then adds the result to
     %% the file buffer.
     case length(W1#writer.values_staging) > ?VALUES_STAGING_SIZE(W1) of
-        true -> 
+        true ->
             W2 = from_iterator_write_values(W1),
             W2;
         false ->
             W1
     end.
 
-from_iterator_process_end_term(Key, W) -> 
+from_iterator_process_end_term(Key, W) ->
     W1 = from_iterator_write_values(W),
 
     %% Add the key to state...
@@ -198,7 +197,7 @@ from_iterator_process_end_term(Key, W) ->
     end.
 
 
-from_iterator_process_end_block(W) when W#writer.keys /= [] -> 
+from_iterator_process_end_block(W) when W#writer.keys /= [] ->
     {FinalKey, _, _, _} = hd(W#writer.keys),
 
     %% Calculate the bloom filter...
@@ -217,16 +216,16 @@ from_iterator_process_end_block(W) when W#writer.keys /= [] ->
                  {mi_utils:edit_signature(FinalTerm, Term), mi_utils:hash_signature(Term), KeySize, ValuesSize, Count}
         end,
     KeyInfoList = [F2(X) || X <- lists:reverse(W#writer.keys)],
-    
+
     %% Add entry to offsets table...
     Value = term_to_binary({W#writer.block_start, Bloom, LongestPrefix, KeyInfoList}, [{compressed, 1}]),
     Entry = {FinalKey, Value},
     true = ets:insert(W#writer.offsets_table, Entry),
     W;
-from_iterator_process_end_block(W) when W#writer.keys == [] -> 
+from_iterator_process_end_block(W) when W#writer.keys == [] ->
     W.
 
-from_iterator_process_end_segment(W) -> 
+from_iterator_process_end_segment(W) ->
     W1 = from_iterator_process_end_block(W),
     from_iterator_flush_buffer(W1, true).
 
@@ -263,7 +262,7 @@ from_iterator_write_values(W) ->
         false ->
             Bytes = term_to_binary(ValuesStaging, [{compressed, ?VALUES_COMPRESS_LEVEL(W)}])
     end,
-    
+
     %% Figure out what we want to write to disk.
     Size = erlang:iolist_size(Bytes),
     Output = [<<0:1/integer, Size:31/unsigned-integer>>, Bytes],
@@ -300,4 +299,3 @@ shrink_key({I,_,_}, {I,Field,Term}) ->
     {Field, Term};
 shrink_key(_, {Index,Field,Term}) ->
     {Index, Field, Term}.
-
