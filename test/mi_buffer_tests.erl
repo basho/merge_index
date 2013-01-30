@@ -142,7 +142,7 @@ prop_truncation_test(Root) ->
          begin
              try
                  Buffer = mi_buffer:write(Entries, mi_buffer:new(Root ++ "_buffer")),
-                 BufferLen = mi_buffer:filesize(Buffer),                 
+                 BufferLen = mi_buffer:filesize(Buffer),
                  ?FORALL(TruncateBy,
                          choose(1, BufferLen-1), check_truncation(Buffer, Entries, TruncateBy))
               after
