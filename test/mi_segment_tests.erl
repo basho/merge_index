@@ -19,9 +19,9 @@
 %% -------------------------------------------------------------------
 
 -module(mi_segment_tests).
--import(common, [g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1, g_value/0,
-                 g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
-                 test_spec/2]).
+-import(common, [entries/0, g_i/0, g_f/0, g_t/0, g_ift/0, g_ift_range/1,
+                 g_value/0, g_props/0, g_tstamp/0, fold_iterator/3,
+                 fold_iterators/3, test_spec/2]).
 
 -ifdef(EQC).
 
@@ -140,6 +140,36 @@ check_iter(Root, Entries, IFT) ->
     mi_buffer:delete(Buffer),
     equals(L1, L2).
 
+prop_data_corruption_test(Root) ->
+    ?LET(Entries, entries(),
+         begin
+             BufName = Root ++ "_buffer",
+             SegName = Root ++ "_segment",
+             CSegName = SegName ++ "_corrupted",
+             Dir = filename:dirname(Root),
+             ?assertCmd("rm -rf " ++ Dir ++ " && mkdir " ++ Dir),
+             Buffer = mi_buffer:write(Entries, mi_buffer:new(BufName)),
+             ok = mi_segment:from_buffer(Buffer, mi_segment:open_write(SegName)),
+             ok = mi_buffer:delete(Buffer),
+             {ok, Bin} = file:read_file(SegName ++ ".data"),
+             Size = size(Bin),
+             ?FORALL({Pos, RandomByte}, noshrink({choose(1, Size - 1), binary(1)}),
+                     begin
+                         BeforePos = Pos - 1,
+                         <<Before:BeforePos/binary,_:1/binary,After/binary>> = Bin,
+                         Bin2 = <<Before/binary,RandomByte/binary,After/binary>>,
+                         ok = file:write_file(CSegName ++ ".data", Bin2),
+                         ?assertCmd("cp " ++ Root ++ "_segment.offsets "
+                                    ++ Root ++ "_segment_corrupted.offsets"),
+                         Seg = mi_segment:open_read(CSegName),
+                         Itr = mi_segment:iterator(Seg),
+                         %% Don't care about result, just want to make
+                         %% sure it doesn't fail
+                         _ = fold_iterator(Itr, fun(X, Acc) -> [X|Acc] end, []),
+                         true
+                     end)
+         end).
+
 prop_basic_test_() ->
     test_spec("/tmp/test/mi_segment_basic", fun prop_basic_test/1).
 
@@ -148,5 +178,8 @@ prop_iter_range_test_() ->
 
 prop_iter_test_() ->
     test_spec("/tmp/test/mi_segment_iter", fun prop_iter_test/1).
+
+prop_corruption_test_() ->
+    test_spec("/tmp/test/mi_segment_data_corruption", fun prop_data_corruption_test/1).
 
 -endif.
