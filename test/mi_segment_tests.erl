@@ -170,6 +170,32 @@ prop_data_corruption_test(Root) ->
                      end)
          end).
 
+prop_offsets_corruption_test(Root) ->
+    ?LET(Entries, entries(),
+         begin
+             BufName = Root ++ "_buffer",
+             SegName = Root ++ "_segment",
+             CSegName = SegName ++ "_corrupted",
+             Dir = filename:dirname(Root),
+             ?assertCmd("rm -rf " ++ Dir ++ " && mkdir " ++ Dir),
+             Buffer = mi_buffer:write(Entries, mi_buffer:new(BufName)),
+             ok = mi_segment:from_buffer(Buffer, mi_segment:open_write(SegName)),
+             ok = mi_buffer:delete(Buffer),
+             {ok, Bin} = file:read_file(SegName ++ ".offsets"),
+             Size = size(Bin),
+             ?FORALL({Pos, RandomByte}, noshrink({choose(1, Size - 1), binary(1)}),
+                     begin
+                         BeforePos = Pos - 1,
+                         <<Before:BeforePos/binary,_:1/binary,After/binary>> = Bin,
+                         Bin2 = <<Before/binary,RandomByte/binary,After/binary>>,
+                         ok = file:write_file(CSegName ++ ".offsets", Bin2),
+                         ?assertCmd("cp " ++ Root ++ "_segment.data "
+                                    ++ Root ++ "_segment_corrupted.data"),
+                         _ = mi_segment:open_read(CSegName),
+                         true
+                     end)
+         end).
+
 prop_basic_test_() ->
     test_spec("/tmp/test/mi_segment_basic", fun prop_basic_test/1).
 
@@ -179,7 +205,10 @@ prop_iter_range_test_() ->
 prop_iter_test_() ->
     test_spec("/tmp/test/mi_segment_iter", fun prop_iter_test/1).
 
-prop_corruption_test_() ->
+prop_data_corruption_test_() ->
     test_spec("/tmp/test/mi_segment_data_corruption", fun prop_data_corruption_test/1).
+
+prop_offsets_corruption_test_() ->
+    test_spec("/tmp/test/mi_segment_offsets_corruption", fun prop_offsets_corruption_test/1).
 
 -endif.
