@@ -144,8 +144,9 @@ iterator(Segment) ->
     case filesize(Segment) =< FullReadSize of
         true ->
             %% Read the entire segment into memory.
-            {ok, Bytes} = file:read_file(data_file(Segment)),
-            fun() -> iterate_all_bytes(undefined, Bytes) end;
+            File = data_file(Segment),
+            {ok, Bytes} = file:read_file(File),
+            fun() -> iterate_all_bytes(undefined, Bytes, File, 0) end;
         false ->
             %% Open a filehandle to the start of the segment.
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_compact_read_ahead_size),
@@ -156,22 +157,85 @@ iterator(Segment) ->
             end
     end.
 
+-define(KEY, <<1:1/integer,
+               Size:15/unsigned-integer,
+               Bytes:Size/binary,
+               Rest/binary>>).
+-define(VALUES, <<0:1/integer,
+                  Size:31/unsigned-integer,
+                  Bytes:Size/binary,
+                  Rest/binary>>).
+
 %% @private Create an iterator over a binary which represents the
 %% entire segment.
-iterate_all_bytes(LastKey, <<1:1/integer, Size:15/unsigned-integer, Bytes:Size/binary, Rest/binary>>) ->
-    Key = expand_key(LastKey, binary_to_term(Bytes)),
-    iterate_all_bytes(Key, Rest);
-iterate_all_bytes(Key, <<0:1/integer, Size:31/unsigned-integer, Bytes:Size/binary, Rest/binary>>) ->
-    Results = binary_to_term(Bytes),
-    iterate_all_bytes_1(Key, Results, Rest);
-iterate_all_bytes(_, <<>>) ->
+iterate_all_bytes(LastKey, ?KEY, File, Offset) ->
+    case try_b2t(Bytes) of
+        {ok, MaybePartialKey} ->
+            Key = expand_key(LastKey, MaybePartialKey),
+            iterate_all_bytes(Key, Rest, File, Offset + Size + 2);
+        corrupt ->
+            StashFile = stash_corrupt(File, Bytes),
+            lager:warning("Corrupted posting key detected in ~s starting"
+                          " at offset ~w with size ~w, stashed in ~s",
+                          [File, Offset, Size + 2, StashFile]),
+            iterate_all_bytes(LastKey, Rest, File, Offset + Size + 2)
+    end;
+
+iterate_all_bytes(Key, ?VALUES, File, Offset) when Key /= undefined ->
+    case try_b2t(Bytes) of
+        {ok, Values} ->
+            try
+                iterate_all_bytes_1(Key, Values, Rest, File, Offset + Size + 4)
+            catch error:function_clause ->
+                    %% This happens when Values is not a list, use
+                    %% try/catch because this should be exceptional
+                    %% case.
+                    StashFile = stash_corrupt(File, Bytes),
+                    lager:warning("Corrupted posting values detected in ~s for key ~p"
+                                  "starting at offset ~w with size ~w, stashed in ~s",
+                                  [File, Key, Offset, Size + 4, StashFile]),
+                    iterate_all_bytes(Key, Rest, File, Offset + Size + 4);
+                  error:badmatch ->
+                    %% This happens if the `Result' in
+                    %% `iterate_all_bytes_1' is corrupted, e.g. bytes
+                    %% corrupted in such a way that tuple arity is not
+                    %% 3.  This could be done in `iterate_all_bytes_1'
+                    %% to be more fine grained but it makes the
+                    %% logging more complex to calculate correct
+                    %% offset.
+                    StashFile = stash_corrupt(File, Bytes),
+                    lager:warning("Corrupted posting values detected in ~s for key ~p"
+                                  "starting at offset ~w with size ~w, stashed in ~s",
+                                  [File, Key, Offset, Size + 4, StashFile]),
+                    iterate_all_bytes(Key, Rest, File, Offset + Size + 4)
+            end;
+        corrupt ->
+            StashFile = stash_corrupt(File, Bytes),
+            lager:warning("Corrupted posting values detected in ~s for key ~p"
+                          "starting at offset ~w with size ~w, stashed in ~s",
+                          [File, Key, Offset, Size + 4, StashFile]),
+            iterate_all_bytes(Key, Rest, File, Offset + Size + 4)
+    end;
+
+iterate_all_bytes(_, <<>>, _, _) ->
+    eof;
+
+iterate_all_bytes(LastKey, Bytes, File, Offset) ->
+    StashFile = stash_corrupt(File, Bytes),
+    lager:warning("Corrupted data detected in ~s with last key of ~p"
+                  "starting at offset ~w with size ~w, stashed in ~s,"
+                  " ignoring rest of file",
+                  [File, LastKey, Offset, size(Bytes) + 4, StashFile]),
     eof.
-iterate_all_bytes_1(Key, [Result|Results], Rest) ->
+
+iterate_all_bytes_1(Key, [Result|Results], Rest, File, Offset) ->
     {I,F,T} = Key,
     {V,K,P} = Result,
-    {{I,F,T,V,K,P}, fun() -> iterate_all_bytes_1(Key, Results, Rest) end};
-iterate_all_bytes_1(Key, [], Rest) ->
-    iterate_all_bytes(Key, Rest).
+    {{I,F,T,V,K,P},
+     fun() -> iterate_all_bytes_1(Key, Results, Rest, File, Offset) end};
+
+iterate_all_bytes_1(Key, [], Rest, File, Offset) ->
+    iterate_all_bytes(Key, Rest, File, Offset).
 
 %% @private Create an iterator over a filehandle starting at position
 %% 0 of the segment.
@@ -434,3 +498,16 @@ expand_key({Index, _, _}, {Field, Term}) ->
     {Index, Field, Term};
 expand_key(_, {Index, Field, Term}) ->
     {Index, Field, Term}.
+
+try_b2t(Binary) ->
+    try
+        {ok, binary_to_term(Binary)}
+    catch
+        error:badarg ->
+            corrupt
+    end.
+
+stash_corrupt(Filename, CorruptedBinary) ->
+    StashFile = Filename ++ "-" ++ integer_to_list(element(3,now())),
+    file:write_file(StashFile, CorruptedBinary),
+    StashFile.
