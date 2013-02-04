@@ -495,7 +495,18 @@ read_seg_entry({File, FH}) ->
             {ok, <<Size2:8/bitstring>>} = file:read(FH, 1),
             <<TotalSize:15/unsigned-integer>> = <<Size1:7/bitstring, Size2:8/bitstring>>,
             {ok, B} = file:read(FH, TotalSize),
-            {key, binary_to_term(B)};
+
+            case try_b2t(B) of
+                {ok, Key} ->
+                    {key, Key};
+                corrupt ->
+                    StashFile = stash_corrupt(File, B),
+                    lager:warning("Corrupted posting key detected in ~s"
+                                  " starting at offset ~w with size ~w,"
+                                  " stashed in ~s",
+                                  [File, Offset, TotalSize, StashFile]),
+                    read_seg_entry({File, FH})
+            end;
         eof ->
             eof
     end.
