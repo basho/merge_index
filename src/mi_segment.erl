@@ -152,8 +152,9 @@ iterator(Segment) ->
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_compact_read_ahead_size),
             fun() ->
                     Opts = [read, raw, binary, {read_ahead, ReadAheadSize}],
-                    {ok, FH} = file:open(data_file(Segment), Opts),
-                    iterate_all_filehandle(FH, undefined, undefined)
+                    File = data_file(Segment),
+                    {ok, FH} = file:open(File, Opts),
+                    iterate_all_filehandle({File, FH}, undefined, undefined)
             end
     end.
 
@@ -239,16 +240,16 @@ iterate_all_bytes_1(Key, [], Rest, File, Offset) ->
 
 %% @private Create an iterator over a filehandle starting at position
 %% 0 of the segment.
-iterate_all_filehandle(File, BaseKey, {key, ShrunkenKey}) ->
+iterate_all_filehandle({File, FH}, BaseKey, {key, ShrunkenKey}) ->
     CurrKey = expand_key(BaseKey, ShrunkenKey),
     {I,F,T} = CurrKey,
     Transform = fun({V,K,P}) -> {I,F,T,V,K,P} end,
-    WhenDone = fun(NextEntry) -> iterate_all_filehandle(File, CurrKey, NextEntry) end,
-    iterate_by_term_values(File, Transform, WhenDone);
-iterate_all_filehandle(File, BaseKey, undefined) ->
-    iterate_all_filehandle(File, BaseKey, read_seg_entry(File));
-iterate_all_filehandle(File, _, eof) ->
-    file:close(File),
+    WhenDone = fun(NextEntry) -> iterate_all_filehandle({File, FH}, CurrKey, NextEntry) end,
+    iterate_by_term_values({File, FH}, Transform, WhenDone);
+iterate_all_filehandle({File, FH}, BaseKey, undefined) ->
+    iterate_all_filehandle({File, FH}, BaseKey, read_seg_entry({File, FH}));
+iterate_all_filehandle({_File, FH}, _, eof) ->
+    file:close(FH),
     eof.
 
 
@@ -283,19 +284,21 @@ iterate_by_keyinfo(BaseKey, Key, EditSigA, HashSigA, FileOffset, [Match={EditSig
             iterate_by_keyinfo(BaseKey, Key, EditSigA, HashSigA, FileOffset + KeySize + ValuesSize, Rest, Segment);
         false ->
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_query_read_ahead_size),
-            {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
+            File = data_file(Segment),
+            {ok, FH} = file:open(File, [read, raw, binary, {read_ahead, ReadAheadSize}]),
             file:position(FH, FileOffset),
-            iterate_by_term(FH, BaseKey, [Match|Rest], Key)
+            iterate_by_term({File, FH}, BaseKey, [Match|Rest], Key)
     end;
 iterate_by_keyinfo(_, _, _, _, _, [], _) ->
     fun() -> eof end.
 
 %% Iterate over the segment file until we find the start of the values
 %% section we want.
-iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
+iterate_by_term({File, FH}, BaseKey,
+                [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
     %% Read the next entry in the segment file.  Value should be a
     %% key, otherwise error.
-    case read_seg_entry(File) of
+    case read_seg_entry({File, FH}) of
         {key, ShrunkenKey} ->
             CurrKey = expand_key(BaseKey, ShrunkenKey),
             %% If the key is smaller than the one we need, keep
@@ -304,38 +307,43 @@ iterate_by_term(File, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
             %% return.
             if
                 CurrKey < Key ->
-                    file:read(File, ValuesSize),
-                    iterate_by_term(File, CurrKey, KeyInfoList, Key);
+                    file:read(FH, ValuesSize),
+                    iterate_by_term({File, FH}, CurrKey, KeyInfoList, Key);
                 CurrKey == Key ->
                     Transform = fun(X) -> X end,
-                    WhenDone = fun(_) -> file:close(File), eof end,
-                    fun() -> iterate_by_term_values(File, Transform, WhenDone) end;
+                    WhenDone = fun(_) -> file:close(FH), eof end,
+                    fun() -> iterate_by_term_values({File, FH}, Transform, WhenDone) end;
                 CurrKey > Key ->
-                    file:close(File),
+                    file:close(FH),
                     fun() -> eof end
             end;
         _ ->
             %% Shouldn't get here. If we're here, then the Offset
             %% values are broken in some way.
-            file:close(File),
+            file:close(FH),
             throw({iterate_term, offset_fail})
     end;
-iterate_by_term(File, _, [], _) ->
-    file:close(File),
+iterate_by_term({_,FH}, _, [], _) ->
+    file:close(FH),
     fun() -> eof end.
 
-iterate_by_term_values(File, TransformFun, WhenDoneFun) ->
+iterate_by_term_values({File, FH}, TransformFun, WhenDoneFun) ->
     %% Read the next value, expose as iterator.
-    case read_seg_entry(File) of
+    case read_seg_entry({File, FH}) of
         {values, Results} ->
-            iterate_by_term_values_1(Results, File, TransformFun, WhenDoneFun);
+            iterate_by_term_values_1(Results, {File, FH}, TransformFun, WhenDoneFun);
         Other ->
             WhenDoneFun(Other)
     end.
-iterate_by_term_values_1([Result|Results], File, TransformFun, WhenDoneFun) ->
-    {TransformFun(Result), fun() -> iterate_by_term_values_1(Results, File, TransformFun, WhenDoneFun) end};
-iterate_by_term_values_1([], File, TransformFun, WhenDoneFun) ->
-    iterate_by_term_values(File, TransformFun, WhenDoneFun).
+
+iterate_by_term_values_1([Result|Results], {File, FH}, TransformFun, WhenDoneFun) ->
+    {TransformFun(Result),
+     fun() ->
+             iterate_by_term_values_1(Results, {File, FH},
+                                      TransformFun, WhenDoneFun)
+     end};
+iterate_by_term_values_1([], {File, FH}, TransformFun, WhenDoneFun) ->
+    iterate_by_term_values({File, FH}, TransformFun, WhenDoneFun).
 
 %% iterators/5 - Return a list of iterators for all the terms in a
 %% given range.
@@ -353,9 +361,10 @@ iterators(Index, Field, StartTerm, EndTerm, Size, Segment) ->
     case get_offset_entry(StartKey, Segment) of
         {OffsetEntryKey, {BlockStart, _, _, _}} ->
             {ok, ReadAheadSize} = application:get_env(merge_index, segment_query_read_ahead_size),
-            {ok, FH} = file:open(data_file(Segment), [read, raw, binary, {read_ahead, ReadAheadSize}]),
+            File = data_file(Segment),
+            {ok, FH} = file:open(File, [read, raw, binary, {read_ahead, ReadAheadSize}]),
             file:position(FH, BlockStart),
-            iterate_range_by_term(FH, OffsetEntryKey, Index, Field,
+            iterate_range_by_term({File, FH}, OffsetEntryKey, Index, Field,
                                   StartTerm1, EndTerm, Size);
         undefined ->
             [fun() -> eof end]
@@ -365,12 +374,13 @@ iterators(Index, Field, StartTerm, EndTerm, Size, Segment) ->
 %% provided range. Keep everything in memory for now. Returns the list
 %% of iterators. TODO - In the future, once we've amassed enough
 %% iterators, write the data out to a separate temporary file.
-iterate_range_by_term(File, BaseKey, Index, Field, StartTerm, EndTerm, Size) ->
-    iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm,
+iterate_range_by_term({File, FH}, BaseKey, Index, Field, StartTerm, EndTerm, Size) ->
+    iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm, EndTerm,
                             Size, false, [], []).
-iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm, Size,
-                        IterateOverValues, ResultsAcc, IteratorsAcc) ->
-    case read_seg_entry(File) of
+
+iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm, EndTerm,
+                        Size, IterateOverValues, ResultsAcc, IteratorsAcc) ->
+    case read_seg_entry({File, FH}) of
         {key, ShrunkenKey} ->
             CurrKey = {I, F, T} = expand_key(BaseKey, ShrunkenKey),
 
@@ -380,7 +390,7 @@ iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm, Size,
             %% return.
             if
                 CurrKey < {Index, Field, StartTerm} ->
-                    iterate_range_by_term_1(File, CurrKey, Index, Field,
+                    iterate_range_by_term_1({File, FH}, CurrKey, Index, Field,
                                             StartTerm, EndTerm, Size,
                                             false, [], IteratorsAcc);
                 I == Index andalso F == Field
@@ -390,31 +400,31 @@ iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm, EndTerm, Size,
                                                             IteratorsAcc),
                     case Size == 'all' orelse size(StartTerm) == Size of
                         true ->
-                            iterate_range_by_term_1(File, CurrKey, Index,
+                            iterate_range_by_term_1({File, FH}, CurrKey, Index,
                                                     Field, StartTerm,
                                                     EndTerm, Size, true,
                                                     [], NewIteratorsAcc);
                         false ->
-                            iterate_range_by_term_1(File, CurrKey, Index,
+                            iterate_range_by_term_1({File, FH}, CurrKey, Index,
                                                     Field, StartTerm, EndTerm,
                                                     Size, false, [],
                                                     NewIteratorsAcc)
                     end;
                 true ->
-                    file:close(File),
+                    file:close(FH),
                     possibly_add_iterator(BaseKey, ResultsAcc, IteratorsAcc)
             end;
         {values, _Results} when not IterateOverValues ->
-            iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm,
+            iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm,
                                     EndTerm, Size, false, [], IteratorsAcc);
         {values, Results} when IterateOverValues ->
-            iterate_range_by_term_1(File, BaseKey, Index, Field, StartTerm,
+            iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm,
                                     EndTerm, Size, true, [Results|ResultsAcc],
                                     IteratorsAcc);
         eof ->
             %% Shouldn't get here. If we're here, then the Offset
             %% values are broken in some way.
-            file:close(File),
+            file:close(FH),
             possibly_add_iterator(BaseKey, ResultsAcc, IteratorsAcc)
     end.
 
@@ -463,13 +473,24 @@ read_offsets(Root) ->
     end.
 
 
-read_seg_entry(FH) ->
+read_seg_entry({File, FH}) ->
+    {ok, Offset} = file:position(FH, cur),
     case file:read(FH, 1) of
         {ok, <<0:1/integer, Size1:7/bitstring>>} ->
             {ok, <<Size2:24/bitstring>>} = file:read(FH, 3),
             <<TotalSize:31/unsigned-integer>> = <<Size1:7/bitstring, Size2:24/bitstring>>,
             {ok, B} = file:read(FH, TotalSize),
-            {values, binary_to_term(B)};
+            case try_b2t(B) of
+                {ok, Values} ->
+                    {values, Values};
+                corrupt ->
+                    StashFile = stash_corrupt(File, B),
+                    lager:warning("Corrupted posting values detected in ~s"
+                                  " starting at offset ~w with size ~w,"
+                                  " stashed in ~s",
+                                  [File, Offset, TotalSize, StashFile]),
+                    read_seg_entry({File, FH})
+            end;
         {ok, <<1:1/integer, Size1:7/bitstring>>} ->
             {ok, <<Size2:8/bitstring>>} = file:read(FH, 1),
             <<TotalSize:15/unsigned-integer>> = <<Size1:7/bitstring, Size2:8/bitstring>>,
