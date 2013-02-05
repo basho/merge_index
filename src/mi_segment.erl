@@ -172,8 +172,16 @@ iterator(Segment) ->
 iterate_all_bytes(LastKey, ?KEY, File, Offset) ->
     case try_b2t(Bytes) of
         {ok, MaybePartialKey} ->
-            Key = expand_key(LastKey, MaybePartialKey),
-            iterate_all_bytes(Key, Rest, File, Offset + Size + 2);
+            try
+                Key = expand_key(LastKey, MaybePartialKey),
+                iterate_all_bytes(Key, Rest, File, Offset + Size + 2)
+            catch error:function_clause ->
+                    StashFile = stash_corrupt(File, Bytes),
+                    lager:warning("Corrupted posting key detected in ~s starting"
+                                  " at offset ~w with size ~w, stashed in ~s",
+                                  [File, Offset, Size + 2, StashFile]),
+                    iterate_all_bytes(LastKey, Rest, File, Offset + Size + 2)
+            end;
         corrupt ->
             StashFile = stash_corrupt(File, Bytes),
             lager:warning("Corrupted posting key detected in ~s starting"
@@ -240,7 +248,7 @@ iterate_all_bytes_1(Key, [], Rest, File, Offset) ->
 
 %% @private Create an iterator over a filehandle starting at position
 %% 0 of the segment.
-iterate_all_filehandle({File, FH}, BaseKey, {key, ShrunkenKey}) ->
+iterate_all_filehandle({File, FH}, BaseKey, {key, ShrunkenKey, _}) ->
     CurrKey = expand_key(BaseKey, ShrunkenKey),
     {I,F,T} = CurrKey,
     Transform = fun({V,K,P}) -> {I,F,T,V,K,P} end,
@@ -250,8 +258,20 @@ iterate_all_filehandle({File, FH}, BaseKey, undefined) ->
     iterate_all_filehandle({File, FH}, BaseKey, read_seg_entry({File, FH}));
 iterate_all_filehandle({_File, FH}, _, eof) ->
     file:close(FH),
-    eof.
-
+    eof;
+iterate_all_filehandle({File, FH}, BaseKey, {values, Values, {Offset, Size}}) ->
+    StashFile = stash_corrupt(File, term_to_binary(Values)),
+    lager:warning("Corrupted posting key detected in ~s at offset ~w of"
+                  " size ~w, stashed in ~s",
+                  [File, Offset, Size, StashFile]),
+    %% Expected a key entry on last read, thus ignore the next entry
+    %% would should be a value.
+    case read_seg_entry({File,FH}) of
+        eof ->
+            eof;
+        _ ->
+            iterate_all_filehandle({File,FH}, BaseKey, read_seg_entry({File,FH}))
+    end.
 
 %%% Create an iterater over a single Term.
 iterator(Index, Field, Term, Segment) ->
@@ -299,7 +319,7 @@ iterate_by_term({File, FH}, BaseKey,
     %% Read the next entry in the segment file.  Value should be a
     %% key, otherwise error.
     case read_seg_entry({File, FH}) of
-        {key, ShrunkenKey} ->
+        {key, ShrunkenKey, _} ->
             CurrKey = expand_key(BaseKey, ShrunkenKey),
             %% If the key is smaller than the one we need, keep
             %% jumping. If it's the one we need, then iterate
@@ -320,6 +340,8 @@ iterate_by_term({File, FH}, BaseKey,
         _ ->
             %% Shouldn't get here. If we're here, then the Offset
             %% values are broken in some way.
+            %%
+            %% TODO: corruption resilient
             file:close(FH),
             throw({iterate_term, offset_fail})
     end;
@@ -330,7 +352,7 @@ iterate_by_term({_,FH}, _, [], _) ->
 iterate_by_term_values({File, FH}, TransformFun, WhenDoneFun) ->
     %% Read the next value, expose as iterator.
     case read_seg_entry({File, FH}) of
-        {values, Results} ->
+        {values, Results, _} ->
             iterate_by_term_values_1(Results, {File, FH}, TransformFun, WhenDoneFun);
         Other ->
             WhenDoneFun(Other)
@@ -381,7 +403,7 @@ iterate_range_by_term({File, FH}, BaseKey, Index, Field, StartTerm, EndTerm, Siz
 iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm, EndTerm,
                         Size, IterateOverValues, ResultsAcc, IteratorsAcc) ->
     case read_seg_entry({File, FH}) of
-        {key, ShrunkenKey} ->
+        {key, ShrunkenKey, _} ->
             CurrKey = {I, F, T} = expand_key(BaseKey, ShrunkenKey),
 
             %% If the key is smaller than the one we need, keep
@@ -414,10 +436,10 @@ iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm, EndTerm,
                     file:close(FH),
                     possibly_add_iterator(BaseKey, ResultsAcc, IteratorsAcc)
             end;
-        {values, _Results} when not IterateOverValues ->
+        {values, _Results, _} when not IterateOverValues ->
             iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm,
                                     EndTerm, Size, false, [], IteratorsAcc);
-        {values, Results} when IterateOverValues ->
+        {values, Results, _} when IterateOverValues ->
             iterate_range_by_term_1({File, FH}, BaseKey, Index, Field, StartTerm,
                                     EndTerm, Size, true, [Results|ResultsAcc],
                                     IteratorsAcc);
@@ -473,6 +495,10 @@ read_offsets(Root) ->
     end.
 
 
+-spec read_seg_entry({term(),term()}) ->
+                            {key, term(), {integer(), integer()}} |
+                            {values, term(), {integer(), integer()}} |
+                            eof.
 read_seg_entry({File, FH}) ->
     {ok, Offset} = file:position(FH, cur),
     case file:read(FH, 1) of
@@ -482,7 +508,7 @@ read_seg_entry({File, FH}) ->
             {ok, B} = file:read(FH, TotalSize),
             case try_b2t(B) of
                 {ok, Values} ->
-                    {values, Values};
+                    {values, Values, {Offset, TotalSize}};
                 corrupt ->
                     StashFile = stash_corrupt(File, B),
                     lager:warning("Corrupted posting values detected in ~s"
@@ -498,7 +524,7 @@ read_seg_entry({File, FH}) ->
 
             case try_b2t(B) of
                 {ok, Key} ->
-                    {key, Key};
+                    {key, Key, {Offset, TotalSize}};
                 corrupt ->
                     StashFile = stash_corrupt(File, B),
                     lager:warning("Corrupted posting key detected in ~s"
