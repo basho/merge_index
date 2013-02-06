@@ -28,31 +28,37 @@
 -include_lib("eqc/include/eqc_statem.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("common.hrl").
-
+-define(APPS, [sasl, syntax_tools, compiler, lager]).
 -define(I, <<"index">>).
 -define(F, <<"field">>).
-
 -record(state, {server_pid,
                 postings=[]}).
 
 lock_doesnt_exist_ce_test() ->
     CE = get_ce("../counter-examples/lock-does-not-exist.eqc"),
-    ?assert(eqc:check(?MODULE:prop_api(), CE)).
+    start_apps(),
+    ?assert(eqc:check(?MODULE:prop_api(), CE)),
+    stop_apps(ignore).
+
+start_apps() ->
+    application:load(merge_index),
+    [application:start(App) || App <- ?APPS].
+
+stop_apps(_) ->
+    application:unload(merge_index),
+    [application:stop(App) || App <- lists:reverse(?APPS)].
 
 prop_api_test_() ->
-    {timeout, 600,
-     fun() ->
-            ?assert(eqc:quickcheck(eqc:numtests(300,?QC_OUT(prop_api()))))
-     end
-    }.
+    {setup,
+     fun start_apps/0,
+     fun stop_apps/1,
+     {timeout, 600,
+      fun() ->
+              ?assert(eqc:quickcheck(eqc:numtests(300,?QC_OUT(prop_api()))))
+      end
+     }}.
 
 prop_api() ->
-    application:load(merge_index),
-    application:start(sasl),
-    application:start(syntax_tools),
-    application:start(compiler),
-    application:start(lager),
-
     %% Comment out following lines to see error reports...otherwise
     %% it's too much noise
     error_logger:delete_report_handler(sasl_report_tty_h),
@@ -85,6 +91,7 @@ prop_api() ->
 
                    aggregate(command_names(Cmds), Res == ok)
                end)).
+
 
 %% ====================================================================
 %% eqc_statem callbacks
