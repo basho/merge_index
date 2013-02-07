@@ -69,8 +69,8 @@ prop_basic_test(Root) ->
                 Segment = mi_segment:open_read(SegName),
 
                 %% Fold over the entire segment
-                SL = fold_iterator(mi_segment:iterator(Segment),
-                                   fun(Item, Acc0) -> [Item | Acc0] end, []),
+                {ok, SL} = fold_iterator(mi_segment:iterator(Segment),
+                                         fun(Item, Acc0) -> [Item | Acc0] end, []),
 
                 Three = lists:sublist(Entries, 3),
                 C1 = lists:map(get_count(L1), Three),
@@ -104,15 +104,15 @@ check_range(Root, Entries, Range) ->
     {Index, Field, StartTerm} = Start,
     {Index, Field, EndTerm} = End,
     Itrs = mi_segment:iterators(Index, Field, StartTerm, EndTerm, all, Segment),
-    L1 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
+    {ok, L1} = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
 
-    L2 = [{V, K, P}
-          || {Ii, Ff, Tt, V, K, P} <- fold_iterator(mi_segment:iterator(Segment),
-                                                    fun(I,A) -> [I|A] end, []),
-             {Ii, Ff, Tt} >= Start, {Ii, Ff, Tt} =< End],
+    {ok, L2} = fold_iterator(mi_segment:iterator(Segment),
+                             fun(I,A) -> [I|A] end, []),
+    L3 = [{V, K, P} || {Ii, Ff, Tt, V, K, P} <- L2,
+                       {Ii, Ff, Tt} >= Start, {Ii, Ff, Tt} =< End],
     mi_buffer:delete(Buffer),
     mi_segment:delete(Segment),
-    equals(lists:sort(L1), lists:sort(L2)).
+    equals(lists:sort(L1), lists:sort(L3)).
 
 prop_iter_test(Root) ->
     ?LET(IFT, {g_i(), g_f(), g_t()},
@@ -134,7 +134,7 @@ check_iter(Root, Entries, IFT) ->
     Segment = mi_segment:open_read(Root ++ "_segment"),
 
     Itr = mi_segment:iterator(I, F, T, Segment),
-    L2 = fold_iterator(Itr, fun(X, Acc) -> [X|Acc] end, []),
+    {ok, L2} = fold_iterator(Itr, fun(X, Acc) -> [X|Acc] end, []),
 
     mi_segment:delete(Segment),
     mi_buffer:delete(Buffer),

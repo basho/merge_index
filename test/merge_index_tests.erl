@@ -20,7 +20,7 @@
 
 -module(merge_index_tests).
 -compile(export_all).
--import(common, [g_i/0, g_f/0, g_t/0, g_props/0, g_value/0]).
+-import(common, [fold_iterator/3, g_i/0, g_f/0, g_t/0, g_props/0, g_value/0]).
 
 -ifdef(EQC).
 
@@ -41,6 +41,7 @@ lock_doesnt_exist_ce_test() ->
     stop_apps(ignore).
 
 start_apps() ->
+
     application:load(merge_index),
     [application:start(App) || App <- ?APPS].
 
@@ -92,6 +93,59 @@ prop_api() ->
                    aggregate(command_names(Cmds), Res == ok)
                end)).
 
+prop_segment_data_corruption_test_() ->
+    {setup,
+     fun start_apps/0,
+     fun stop_apps/1,
+     {timeout, 60,
+      fun() ->
+              ?assert(eqc:quickcheck(
+                        eqc:numtests(300,
+                                     ?QC_OUT(prop_segment_data_corruption()))))
+      end
+     }}.
+
+-define(ALL_FILTER, fun(_,_) -> true end).
+-define(GATHER, fun(X,Acc) -> [X|Acc] end).
+
+prop_segment_data_corruption() ->
+    %% Comment out following lines to see error reports...otherwise
+    %% it's too much noise
+    error_logger:delete_report_handler(sasl_report_tty_h),
+    lager:set_loglevel(lager_console_backend, critical),
+
+    Tmp = "segment-data-corruption",
+    MI = "../test/test-mi",
+    ?assertCmd("rm -rf " ++ Tmp),
+    Cmd = io_lib:format("cp -r ~s ~s", [MI, Tmp]),
+    ?assertCmd(lists:flatten(Cmd)),
+    SegFile = Tmp ++ "/segment.1.data",
+    {ok, Bin} = file:read_file(SegFile),
+    Size = size(Bin),
+    ?FORALL({Pos, RandomByte}, noshrink({choose(1, Size - 1), binary(1)}),
+            ?TRAPEXIT(
+               begin
+                   BeforePos = Pos - 1,
+                   <<Before:BeforePos/binary,_:1/binary,After/binary>> = Bin,
+                   Bin2 = <<Before/binary,RandomByte/binary,After/binary>>,
+                   ok = file:write_file(SegFile, Bin2),
+                   {ok, Server} = merge_index:start_link(Tmp),
+                   Itr = merge_index:iterator(Server, ?ALL_FILTER),
+                   case fold_iterator(Itr, ?GATHER, []) of
+                       {error, _} ->
+                           %% If corruption occurred then verify bad
+                           %% file was removed for next read.
+                           Itr2 = merge_index:iterator(Server, ?ALL_FILTER),
+                           {ok, _} = fold_iterator(Itr2, ?GATHER, []),
+                           true;
+                       {ok, _} ->
+                           %% In this case corruption technically
+                           %% happened but not in a manner that causes
+                           %% an error.  CRCs are needed to detect
+                           %% this type of corruption.
+                           true
+                   end
+               end)).
 
 %% ====================================================================
 %% eqc_statem callbacks

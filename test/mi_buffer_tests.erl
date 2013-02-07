@@ -47,8 +47,8 @@ check_entries(Root, Entries) ->
           || {{I, F, T}, Value, Tstamp, Props} <- Entries],
     ES = length(L1),
 
-    L2 = fold_iterator(mi_buffer:iterator(Buffer),
-                       fun(Item, Acc0) -> [Item | Acc0] end, []),
+    {ok, L2} = fold_iterator(mi_buffer:iterator(Buffer),
+                             fun(Item, Acc0) -> [Item | Acc0] end, []),
     AS = mi_buffer:size(Buffer),
     Name = mi_buffer:filename(Buffer),
 
@@ -78,7 +78,7 @@ check_range(Root, Entries, Range) ->
                        IFT >= Start, IFT =< End],
 
     Itrs = mi_buffer:iterators(Index, Field, StartTerm, EndTerm, all, Buffer),
-    L2 = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
+    {ok, L2} = fold_iterators(Itrs, fun(Item, Acc0) -> [Item | Acc0] end, []),
 
     mi_buffer:delete(Buffer),
     equals(lists:sort(L1), lists:sort(L2)).

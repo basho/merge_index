@@ -54,16 +54,22 @@ fold_iterator(Itr, Fn, Acc0) ->
     fold_iterator_inner(Itr(), Fn, Acc0).
 
 fold_iterator_inner(eof, _Fn, Acc) ->
-    lists:reverse(Acc);
+    {ok, lists:reverse(Acc)};
+fold_iterator_inner({error, _}=Err, _Fn, _Acc) ->
+    Err;
 fold_iterator_inner({Term, NextItr}, Fn, Acc0) ->
     Acc = Fn(Term, Acc0),
     fold_iterator_inner(NextItr(), Fn, Acc).
 
 fold_iterators([], _Fun, Acc) ->
-    lists:reverse(Acc);
+    {ok, lists:reverse(Acc)};
 fold_iterators([Itr|Itrs], Fun, Acc0) ->
-    Acc = fold_iterator(Itr, Fun, Acc0),
-    fold_iterators(Itrs, Fun, Acc).
+    case fold_iterator(Itr, Fun, Acc0) of
+        {ok, Acc} ->
+            fold_iterators(Itrs, Fun, Acc);
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %% Remember, tstamps are inverted by mi_server.
 unique_latest({{Index, Field, Term}, Value, Tstamp, Props}, Acc) ->
