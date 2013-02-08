@@ -46,10 +46,11 @@
 -define(BLOCK_SIZE, 65536).
 -define(BLOOM_CAPACITY, 512).
 -define(BLOOM_ERROR, 0.01).
--define(CHECK(Segment, Expr),
+-define(CHECK(FH, Segment, Expr),
         try
             Expr
         catch error:badarg ->
+                file:close(FH),
                 throw({corrupt_segment, Seg})
         end).
 %% MIN_VALUE is used during range searches. Numbers sort the smallest
@@ -191,7 +192,7 @@ iterate_all_filehandle(File, Seg, BaseKey, {key, ShrunkenKey}) ->
     WhenDone = fun(NextEntry) -> iterate_all_filehandle(File, Seg, CurrKey, NextEntry) end,
     iterate_by_term_values(File, Seg, Transform, WhenDone);
 iterate_all_filehandle(File, Seg, BaseKey, undefined) ->
-    iterate_all_filehandle(File, Seg, BaseKey, ?CHECK(Seg, read_seg_entry(File)));
+    iterate_all_filehandle(File, Seg, BaseKey, ?CHECK(File, Seg, read_seg_entry(File)));
 iterate_all_filehandle(File, _, _, eof) ->
     file:close(File),
     eof.
@@ -240,7 +241,7 @@ iterate_by_keyinfo(_, _, _, _, _, [], _) ->
 iterate_by_term(File, Seg, BaseKey, [{_, _, _, ValuesSize, _}|KeyInfoList], Key) ->
     %% Read the next entry in the segment file.  Value should be a
     %% key, otherwise error.
-    case ?CHECK(Seg, read_seg_entry(File)) of
+    case ?CHECK(File, Seg, read_seg_entry(File)) of
         {key, ShrunkenKey} ->
             CurrKey = expand_key(BaseKey, ShrunkenKey),
             %% If the key is smaller than the one we need, keep
@@ -271,7 +272,7 @@ iterate_by_term(File, _, _, [], _) ->
 
 iterate_by_term_values(File, Seg, TransformFun, WhenDoneFun) ->
     %% Read the next value, expose as iterator.
-    case ?CHECK(Seg, read_seg_entry(File)) of
+    case ?CHECK(File, Seg, read_seg_entry(File)) of
         {values, Results} ->
             iterate_by_term_values_1(Results, File, Seg, TransformFun, WhenDoneFun);
         Other ->
@@ -284,7 +285,12 @@ iterate_by_term_values_1([Result|Results], File, Seg, TransformFun, WhenDoneFun)
              iterate_by_term_values_1(Results, File, Seg, TransformFun, WhenDoneFun)
      end};
 iterate_by_term_values_1([], File, Seg, TransformFun, WhenDoneFun) ->
-    iterate_by_term_values(File, Seg, TransformFun, WhenDoneFun).
+    iterate_by_term_values(File, Seg, TransformFun, WhenDoneFun);
+iterate_by_term_values_1(_, File, Seg, _, _) ->
+    %% If `Results' isn't a list then corruption has occurred in a way
+    %% that binary_to_term didn't fail but the term has been mutated.
+    file:close(File),
+    throw({corrupt_segment, Seg}).
 
 %% iterators/5 - Return a list of iterators for all the terms in a
 %% given range.
@@ -320,7 +326,7 @@ iterate_range_by_term(File, Seg, BaseKey, Index, Field, StartTerm, EndTerm, Size
 
 iterate_range_by_term_1(File, Seg, BaseKey, Index, Field, StartTerm, EndTerm, Size,
                         IterateOverValues, ResultsAcc, IteratorsAcc) ->
-    case ?CHECK(Seg, read_seg_entry(File)) of
+    case ?CHECK(File, Seg, read_seg_entry(File)) of
         {key, ShrunkenKey} ->
             %% Expand the possibly shrunken key...
             CurrKey = {I, F, T} = expand_key(BaseKey, ShrunkenKey),
