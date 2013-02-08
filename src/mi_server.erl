@@ -522,31 +522,34 @@ handle_info({'EXIT', Pid, Reason},
         {value, SR, NewSRPids} ->
             %% One of our lookup or range processes exited
 
-            case Reason of
-                normal ->
-                    SR#stream_range.caller ! {eof, SR#stream_range.ref};
-                _ ->
-                    lager:error("lookup/range failure: ~p", [Reason]),
-                    SR#stream_range.caller
-                        ! {error, SR#stream_range.ref, Reason}
-            end,
+            State2 =
+                case Reason of
+                    normal ->
+                        SR#stream_range.caller ! {eof, SR#stream_range.ref},
+                        State;
+                    {{nocatch,{corrupt_segment,Seg}},Trace} ->
+                        %% TODO: first need to mv segment
+                        Filename = mi_segment:filename(Seg),
+                        stash_corrupt(Seg),
+                        lager:debug("Trace of corruption ~p", [Trace]),
+                        SR#stream_range.caller
+                            ! {error, SR#stream_range.ref, {corrupted_segment,Seg,Trace}},
+                        set_deleteme_flag(Filename),
+                        Locks2 = mi_locks:when_free(Filename,
+                                                   fun() -> mi_segment:delete(Seg) end,
+                                                   State#state.locks),
+                        State#state{locks=Locks2,
+                                    segments=State#state.segments -- [Seg]};
+                    _ ->
+                        lager:error("lookup/range failure: ~p", [Reason]),
+                        SR#stream_range.caller
+                            ! {error, SR#stream_range.ref, Reason},
+                        State
+                end,
 
-            %% Remove locks from all buffers...
-            F1 = fun(Buffer, Acc) ->
-                mi_locks:release(mi_buffer:filename(Buffer), Acc)
-            end,
-            NewLocks = lists:foldl(F1, State#state.locks,
-                                   SR#stream_range.buffers),
-
-            %% Remove locks from all segments...
-            F2 = fun(Segment, Acc) ->
-                mi_locks:release(mi_segment:filename(Segment), Acc)
-            end,
-            NewLocks1 = lists:foldl(F2, NewLocks,
-                                   SR#stream_range.segments),
-
-            {noreply, State#state { locks=NewLocks1,
-                                    lookup_range_pids=NewSRPids }};
+            Locks = remove_locks(State2#state.locks, SR),
+            {noreply, State2#state { locks=Locks,
+                                     lookup_range_pids=NewSRPids }};
         false ->
             %% some random other process exited: ignore
             {noreply, State}
@@ -795,3 +798,35 @@ lock_all(Locks, Buffers, Segments) ->
     BufferNames = buffer_filenames(Buffers),
     SegmentNames = segment_filenames(Segments),
     mi_locks:claim_many(BufferNames ++ SegmentNames, Locks).
+
+remove_locks(Locks, #stream_range{buffers=Buffs, segments=Segs}) ->
+            F1 = fun(Buffer, Acc) ->
+                mi_locks:release(mi_buffer:filename(Buffer), Acc)
+            end,
+            Locks1 = lists:foldl(F1, Locks, Buffs),
+            F2 = fun(Segment, Acc) ->
+                mi_locks:release(mi_segment:filename(Segment), Acc)
+            end,
+            lists:foldl(F2, Locks1, Segs).
+
+stash_corrupt(Seg) ->
+    Data = mi_segment:data_file(Seg),
+    Offsets = mi_segment:offsets_file(Seg),
+    Dir = filename:dirname(Data),
+    CDir = filename:join([Dir, "corrupt"]),
+    filelib:ensure_dir(CDir),
+    file:make_dir(CDir),
+    Stamp = integer_to_list(element(3, now())),
+
+    DBase = filename:basename(Data),
+    CDBase = DBase ++ "-" ++ "corrupt-" ++ Stamp,
+    StashData = filename:join([CDir, CDBase]),
+    file:copy(Data, StashData),
+
+    OBase = filename:basename(Offsets),
+    COBase = OBase ++ "-" ++ "corrupt-" ++ Stamp,
+    StashOffsets = filename:join([CDir, COBase]),
+    file:copy(Offsets, StashOffsets),
+
+    lager:error("Corruption detected in segment ~s, stashed as ~s", [Data, StashData]),
+    ok.

@@ -125,25 +125,32 @@ prop_segment_data_corruption() ->
     ?FORALL({Pos, RandomByte}, noshrink({choose(1, Size - 1), binary(1)}),
             ?TRAPEXIT(
                begin
+                   Cmd2 = io_lib:format("cp ~s/* ~s", [MI, Tmp]),
+                   ?assertCmd(lists:flatten(Cmd2)),
+
                    BeforePos = Pos - 1,
                    <<Before:BeforePos/binary,_:1/binary,After/binary>> = Bin,
                    Bin2 = <<Before/binary,RandomByte/binary,After/binary>>,
                    ok = file:write_file(SegFile, Bin2),
                    {ok, Server} = merge_index:start_link(Tmp),
-                   Itr = merge_index:iterator(Server, ?ALL_FILTER),
-                   case fold_iterator(Itr, ?GATHER, []) of
-                       {error, _} ->
-                           %% If corruption occurred then verify bad
-                           %% file was removed for next read.
-                           Itr2 = merge_index:iterator(Server, ?ALL_FILTER),
-                           {ok, _} = fold_iterator(Itr2, ?GATHER, []),
-                           true;
-                       {ok, _} ->
-                           %% In this case corruption technically
-                           %% happened but not in a manner that causes
-                           %% an error.  CRCs are needed to detect
-                           %% this type of corruption.
-                           true
+                   try
+                       Itr = merge_index:iterator(Server, ?ALL_FILTER),
+                       case fold_iterator(Itr, ?GATHER, []) of
+                           {error, _} ->
+                               %% If corruption occurred then verify bad
+                               %% file was removed for next read.
+                               Itr2 = merge_index:iterator(Server, ?ALL_FILTER),
+                               {ok, _} = fold_iterator(Itr2, ?GATHER, []),
+                               true;
+                           {ok, _} ->
+                               %% In this case corruption technically
+                               %% happened but not in a manner that causes
+                               %% an error.  CRCs are needed to detect
+                               %% this type of corruption.
+                               true
+                       end
+                   after
+                       merge_index:stop(Server)
                    end
                end)).
 
