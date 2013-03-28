@@ -30,6 +30,7 @@
     filename/1,
     filesize/1,
     staleness/2,
+    is_stale/2,
     delete/1,
     data_file/1,
     offsets_file/1,
@@ -108,14 +109,15 @@ filesize(Segment) ->
     Segment#segment.size.
 
 staleness(Segment, TimeScalar) ->
-    %% Express staleness by taking the current time - the local time. If it's negative, 
-    %% just make it zero, because files created in the future are likely very fresh.  
+    %% Express staleness by taking the current time - the local time. If it's negative,
+    %% just make it zero, because files created in the future are likely very fresh.
     %% Integer division will give us some chunky steps
     SecondsStale = dt2gs(calendar:local_time()) - dt2gs(filelib:last_modified(data_file(Segment#segment.root))),
-    case SecondsStale < 0 ->
-    	0
+    case SecondsStale < 0 of
+    	false ->
+	    	0
     end,
-    	
+	
     case TimeScalar of
     	second ->
     		SecondsStale;
@@ -138,10 +140,11 @@ staleness(Segment, TimeScalar) ->
     end.
 
 is_stale(Segment, StalenessThreshold) ->
-	staleness(Segment, element(2, StalenessThreshold)) >= element(1, StalenessThreshold).
-	
-	
-dt2gs(DateTime) -> 
+	IsStale = staleness(Segment, element(2, StalenessThreshold)) >= element(1, StalenessThreshold),
+    lager:debug("is_stale(~p,~p) = ~p~n",[Segment, StalenessThreshold, IsStale]),
+	IsStale.
+
+dt2gs(DateTime) ->
 	%% Just a helper to make the staleness function a little less ugly.
     calendar:datetime_to_gregorian_seconds(DateTime).
 
@@ -157,6 +160,7 @@ delete(Segment) ->
 %%   `ToMerge' - The list of segments to merge.
 -spec compact_by_average(segments()) -> ToMerge::segments().
 compact_by_average(Segments) ->
+    lager:debug("compact_by_average(~p)~n",[Segments]),
     %% Take the average of segment sizes, return anything smaller than
     %% the average for merging.
     F1 = fun(X) ->
@@ -176,6 +180,7 @@ compact_by_average(Segments) ->
 %%   `ToMerge' - The list of segments to merge.
 -spec compact_by_average_and_staleness(segments()) -> ToMerge::segments().
 compact_by_average_and_staleness(Segments) ->
+    lager:debug("compact_by_average_and_staleness(~p)~n",[Segments]),
     %% Take the average of segment sizes, return anything smaller than
     %% the average for merging.
     {ok, StalenessThreshold} = application:get_env(merge_index, compact_staleness_threshold),
@@ -186,7 +191,7 @@ compact_by_average_and_staleness(Segments) ->
     end,
     SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
     Avg = lists:sum([Size || {Size, _} <- SortedSizedSegments]) div length(Segments) + 1024,
-
+	
     %% Lets try to keep the segments fresh by compacting those stale segments
     [Segment || {Size, IsStale, Segment} <- SortedSizedSegments, Size < Avg or IsStale].
 
@@ -197,6 +202,7 @@ compact_by_average_and_staleness(Segments) ->
 %%   `ToMerge' - The list of segments to merge.
 -spec compact_all(segments()) -> ToMerge::segments().
 compact_all(Segments) ->
+    lager:debug("compact_all(~p)~n",[Segments]),
     Segments.
 
 %% Create a segment from a Buffer (see mi_buffer.erl)

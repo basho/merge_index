@@ -224,7 +224,7 @@ handle_call({index, Postings}, _From, State) ->
     end;
 
 handle_call(start_compaction, _From, State)
-  when is_tuple(State#state.is_compacting) orelse length(State#state.segments) =< 5 ->
+  when is_tuple(State#state.is_compacting) ->
     %% Don't compact if we are already compacting, or if we have fewer
     %% than five open segments.
     {reply, {ok, 0, 0}, State};
