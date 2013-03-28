@@ -30,6 +30,7 @@
     filename/1,
     filesize/1,
     delete/1,
+    segments_to_merge/1,
     data_file/1,
     offsets_file/1,
     from_buffer/2,
@@ -104,6 +105,23 @@ delete(Segment) ->
     [ok = file:delete(X) || X <- filelib:wildcard(Segment#segment.root ++ ".*")],
     ets:delete(Segment#segment.offsets_table),
     ok.
+
+%% @doc Given a list of segments calculate a subset of them to merge.
+%%
+%%   `Segments' - The list of potential segments to merge.
+%%
+%%   `ToMerge' - The list of segments to merge.
+-spec segments_to_merge(segments()) -> ToMerge::segments().
+segments_to_merge(Segments) ->
+    %% Take the average of segment sizes, return anything smaller than
+    %% the average for merging.
+    F1 = fun(X) ->
+        Size = mi_segment:filesize(X),
+        {Size, X}
+    end,
+    SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
+    Avg = lists:sum([Size || {Size, _} <- SortedSizedSegments]) div length(Segments) + 1024,
+    [Segment || {Size, Segment} <- SortedSizedSegments, Size < Avg].
 
 %% Create a segment from a Buffer (see mi_buffer.erl)
 from_buffer(Buffer, Segment) ->
