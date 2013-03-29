@@ -12,7 +12,7 @@
             {buffer_delayed_write_size, 524288},
             {buffer_delayed_write_ms, 2000},
             {compact_mod_fun, {mi_segment, compact_by_average}},
-            {compact_staleness_threshold, {7, days}},
+            {compact_staleness_threshold, {1, hours}},
             {max_compact_segments, 20},
             {segment_query_read_ahead_size, 65536},
             {segment_compact_read_ahead_size, 5242880},
