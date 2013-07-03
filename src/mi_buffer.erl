@@ -51,11 +51,11 @@
 new(Filename) ->
     %% Open the existing buffer file...
     filelib:ensure_dir(Filename),
-    {ok, DelayedWriteSize} = application:get_env(merge_index, buffer_delayed_write_size),
-    {ok, DelayedWriteMS} = application:get_env(merge_index, buffer_delayed_write_ms),
-    FuzzedWriteSize = trunc(mi_utils:fuzz(DelayedWriteSize, 0.1)),
-    FuzzedWriteMS = trunc(mi_utils:fuzz(DelayedWriteMS, 0.1)),
-    {ok, FH} = file:open(Filename, [read, write, raw, binary, {delayed_write, FuzzedWriteSize, FuzzedWriteMS}]),
+    %% {ok, DelayedWriteSize} = application:get_env(merge_index, buffer_delayed_write_size),
+    %% {ok, DelayedWriteMS} = application:get_env(merge_index, buffer_delayed_write_ms),
+    %% FuzzedWriteSize = trunc(mi_utils:fuzz(DelayedWriteSize, 0.1)),
+    %% FuzzedWriteMS = trunc(mi_utils:fuzz(DelayedWriteMS, 0.1)),
+    {ok, FH} = file:open(Filename, [read, write, raw, binary]),
 
     %% Read into an ets table...
     Table = ets:new(buffer, [duplicate_bag, public]),

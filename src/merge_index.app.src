@@ -1,6 +1,6 @@
 {application, merge_index,
     [{description, "Merge-Index Data Store"},
-     {vsn, "1.3.0"},
+     {vsn, "1.3.1nodw"},
      {applications, [kernel,
                      stdlib,
                      sasl]},
