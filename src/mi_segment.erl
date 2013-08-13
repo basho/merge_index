@@ -140,6 +140,8 @@ delete(Segment) ->
 %%
 %%   `ToMerge' - The list of segments to merge.
 -spec compact_by_average(segments()) -> ToMerge::segments().
+compact_by_average([]) ->
+    [];
 compact_by_average(Segments) ->
     %% Take the average of segment sizes, return anything smaller than
     %% the average for merging.
@@ -160,6 +162,8 @@ compact_by_average(Segments) ->
 %%
 %%   `ToMerge' - The list of segments to merge.
 -spec compact_by_average_and_staleness(segments()) -> ToMerge::segments().
+compact_by_average_and_staleness([]) ->
+    [];
 compact_by_average_and_staleness(Segments) ->
     %% Take the average of segment sizes, return anything smaller than
     %% the average for merging.
