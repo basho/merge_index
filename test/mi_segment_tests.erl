@@ -24,10 +24,10 @@
                  test_spec/2]).
 
 -include("merge_index.hrl").
--include_lib("eunit/include/eunit.hrl").
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
 -endif.
+-include_lib("eunit/include/eunit.hrl").
 
 fake_seg(Size, MTime) ->
     #segment{root=ignore, offsets_table=ignore, mtime=MTime, size=Size}.
