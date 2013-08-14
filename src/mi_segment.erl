@@ -29,6 +29,8 @@
     open_write/1,
     filename/1,
     filesize/1,
+    staleness/2,
+    is_stale/2,
     delete/1,
     data_file/1,
     offsets_file/1,
@@ -38,6 +40,12 @@
     iterator/1,
     iterator/4,
     iterators/6
+]).
+
+-export([
+    compact_by_average/1,
+    compact_by_average_and_staleness/1,
+    compact_all/1
 ]).
 
 -include("merge_index.hrl").
@@ -62,15 +70,14 @@ open_read(Root) ->
     DataFileExists = filelib:is_file(data_file(Root)),
     case DataFileExists of
         true  ->
-            %% Get the fileinfo...
             {ok, FileInfo} = file:read_file_info(data_file(Root)),
-
             OffsetsTable = read_offsets(Root),
             lager:debug("opened segment '~s' for read", [Root]),
             #segment {
                        root=Root,
                        offsets_table=OffsetsTable,
-                       size = FileInfo#file_info.size
+                       size = FileInfo#file_info.size,
+                       mtime = FileInfo#file_info.mtime
                      };
         false ->
             throw({?MODULE, missing__file, Root})
@@ -100,10 +107,94 @@ filename(Segment) ->
 filesize(Segment) ->
     Segment#segment.size.
 
+mtime(Segment) ->
+    Segment#segment.mtime.
+
+staleness(Segment, TimeScalar) ->
+    %% Express staleness by taking the current time - the local time. If it's negative,
+    %% just make it zero, because files created in the future are likely very fresh.
+    %% Integer division will give us some chunky steps
+    LocalTime = dt2gs(calendar:local_time()),
+    ModifiedTime = dt2gs(mtime(Segment)),
+    SecondsStale =  max(0, LocalTime - ModifiedTime),
+
+    case TimeScalar of
+    	minutes -> SecondsStale div 60;
+    	hours -> SecondsStale div 3600
+    end.
+
+is_stale(Segment, {Value, TimeScalar}) ->
+    staleness(Segment, TimeScalar) >= Value.
+
+dt2gs(DateTime) ->
+    calendar:datetime_to_gregorian_seconds(DateTime).
+
 delete(Segment) ->
     [ok = file:delete(X) || X <- filelib:wildcard(Segment#segment.root ++ ".*")],
     ets:delete(Segment#segment.offsets_table),
     ok.
+
+%% @doc Given a list of segments calculate a subset of them to merge.
+%%
+%%   `Segments' - The list of potential segments to merge.
+%%
+%%   `ToMerge' - The list of segments to merge.
+-spec compact_by_average(segments()) -> ToMerge::segments().
+compact_by_average([]) ->
+    [];
+compact_by_average(Segments) ->
+    %% Take the average of segment sizes, return anything smaller than
+    %% the average for merging.
+    F1 = fun(X) ->
+        Size = mi_segment:filesize(X),
+        {Size, X}
+    end,
+    SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
+    Avg = lists:sum([Size || {Size, _} <- SortedSizedSegments]) div length(Segments) + 1024,
+    [Segment || {Size, Segment} <- SortedSizedSegments, Size < Avg].
+
+
+%% @doc Given a list of segments calculate a subset of them to merge.  This is similar
+%%      to the original version, but adds a staleness check into the equation which will
+%%      prevent old, large files from not being merged.
+%%
+%%   `Segments' - The list of potential segments to merge.
+%%
+%%   `ToMerge' - The list of segments to merge.
+-spec compact_by_average_and_staleness(segments()) -> ToMerge::segments().
+compact_by_average_and_staleness([]) ->
+    [];
+compact_by_average_and_staleness(Segments) ->
+    %% Take the average of segment sizes, return anything smaller than
+    %% the average for merging.
+    StalenessThreshold =
+        case application:get_env(merge_index, compact_staleness_threshold) of
+            %% This value can come from user, perform strict checking
+            {ok, {X,Y}=V} when is_integer(X),
+                               Y == minutes orelse Y == hours ->
+                V;
+            _ ->
+                {1, hours}
+        end,
+    F1 = fun(X) ->
+        Size = mi_segment:filesize(X),
+        IsStale = mi_segment:is_stale(X, StalenessThreshold),
+        {Size, IsStale, X}
+    end,
+    SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
+    Avg = lists:sum([Size || {Size, _, _} <- SortedSizedSegments]) div length(Segments) + 1024,
+
+    %% Include stale segments to reclaim more disk space
+    [Segment || {Size, IsStale, Segment} <- SortedSizedSegments, (Size < Avg) orelse IsStale].
+
+%% @doc Return list of segments verbatim so that all segments are merged.
+%%
+%%   `Segments' - The list of potential segments to merge.
+%%
+%%   `ToMerge' - The list of segments to merge.
+-spec compact_all(segments()) -> ToMerge::segments().
+compact_all(Segments) ->
+    Segments.
 
 %% Create a segment from a Buffer (see mi_buffer.erl)
 from_buffer(Buffer, Segment) ->

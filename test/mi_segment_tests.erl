@@ -23,11 +23,51 @@
                  g_props/0, g_tstamp/0, fold_iterator/3, fold_iterators/3,
                  test_spec/2]).
 
+-include("merge_index.hrl").
 -ifdef(EQC).
-
--compile(export_all).
 -include_lib("eqc/include/eqc.hrl").
+-endif.
 -include_lib("eunit/include/eunit.hrl").
+
+fake_seg(Size, MTime) ->
+    #segment{root=ignore, offsets_table=ignore, mtime=MTime, size=Size}.
+
+compact_by_average_and_staleness_test() ->
+    application:load(merge_index),
+    DT2GS = fun(DateTime) -> calendar:datetime_to_gregorian_seconds(DateTime) end,
+    GS2DT = fun(GS) -> calendar:gregorian_seconds_to_datetime(GS) end,
+    LocalTimeS = DT2GS(calendar:local_time()),
+    %% 30 mins ago
+    MinsAgoS = LocalTimeS - (30 * 60),
+    SegMinsAgo = fake_seg(4096, GS2DT(MinsAgoS)),
+    %% 3 hours ago
+    HoursAgoS = LocalTimeS - (3 * 3600),
+    SegHoursAgo = fake_seg(4096, GS2DT(HoursAgoS)),
+
+    Seg1 = fake_seg(512, GS2DT(LocalTimeS)),
+    Seg2 = fake_seg(512, GS2DT(LocalTimeS)),
+    Seg3 = fake_seg(512, GS2DT(LocalTimeS)),
+
+    Segs = [Seg1, Seg2, Seg3, SegMinsAgo, SegHoursAgo],
+
+    %% Verify that undefined threshold results in 1 hour
+    ?assertEqual(lists:sort([Seg1, Seg2, Seg3, SegHoursAgo]),
+                 lists:sort(mi_segment:compact_by_average_and_staleness(Segs))),
+
+    %% Verify 30 mins
+    application:set_env(merge_index, compact_staleness_threshold, {30, minutes}),
+    ?assertEqual(lists:sort([Seg1, Seg2, Seg3, SegMinsAgo, SegHoursAgo]),
+                 lists:sort(mi_segment:compact_by_average_and_staleness(Segs))),
+
+    %% Verify threshold over 3 hours
+    application:set_env(merge_index, compact_staleness_threshold, {10, hours}),
+    ?assertEqual(lists:sort([Seg1, Seg2, Seg3]),
+                 lists:sort(mi_segment:compact_by_average_and_staleness(Segs))),
+    application:unload(merge_index).
+
+
+-ifdef(EQC).
+-compile(export_all).
 -include("common.hrl").
 
 get_count(Entries) ->

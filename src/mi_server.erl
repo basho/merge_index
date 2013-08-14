@@ -224,7 +224,7 @@ handle_call({index, Postings}, _From, State) ->
     end;
 
 handle_call(start_compaction, _From, State)
-  when is_tuple(State#state.is_compacting) orelse length(State#state.segments) =< 5 ->
+  when is_tuple(State#state.is_compacting) ->
     %% Don't compact if we are already compacting, or if we have fewer
     %% than five open segments.
     {reply, {ok, 0, 0}, State};
@@ -235,32 +235,41 @@ handle_call(start_compaction, From, State) ->
     %% optimized with tuning, but probably a good enough solution.
     Segments = State#state.segments,
     {ok, MaxSegments} = application:get_env(merge_index, max_compact_segments),
-    SegmentsToCompact = case get_segments_to_merge(Segments) of
+    {ok, {M,F}} = application:get_env(merge_index, compact_mod_fun),
+    SegmentsToCompact = case M:F(Segments) of
                             STC when length(STC) > MaxSegments ->
                                 lists:sublist(STC, MaxSegments);
                             STC ->
                                 STC
                         end,
-    BytesToCompact = lists:sum([mi_segment:filesize(X) || X <- SegmentsToCompact]),
 
-    %% Spawn a function to merge a bunch of segments into one...
-    Pid = self(),
-    CompactingPid = spawn_opt(fun() ->
-        %% Create the group iterator...
-        SegmentIterators = [mi_segment:iterator(X) || X <- SegmentsToCompact],
-        GroupIterator = build_iterator_tree(SegmentIterators),
+    case SegmentsToCompact of
+        [] ->
+            {reply, {ok, 0, 0}, State};
+        _ ->
+            BytesToCompact = lists:sum([mi_segment:filesize(X) || X <- SegmentsToCompact]),
 
-        %% Create the new compaction segment...
-        <<MD5:128/integer>> = erlang:md5(term_to_binary({now, make_ref()})),
-        SName = join(State, io_lib:format("segment.~.16B", [MD5])),
-        set_deleteme_flag(SName),
-        CompactSegment = mi_segment:open_write(SName),
+            %% Spawn a function to merge a bunch of segments into one...
+            Pid = self(),
+            CF =
+                fun() ->
+                        %% Create the group iterator...
+                        SegmentIterators = [mi_segment:iterator(X) || X <- SegmentsToCompact],
+                        GroupIterator = build_iterator_tree(SegmentIterators),
 
-        %% Run the compaction...
-        mi_segment:from_iterator(GroupIterator, CompactSegment),
-        gen_server:cast(Pid, {compacted, CompactSegment, SegmentsToCompact, BytesToCompact, From})
-    end, [link, {fullsweep_after, 0}]),
-    {noreply, State#state { is_compacting={From, CompactingPid} }};
+                        %% Create the new compaction segment...
+                        <<MD5:128/integer>> = erlang:md5(term_to_binary({now, make_ref()})),
+                        SName = join(State, io_lib:format("segment.~.16B", [MD5])),
+                        set_deleteme_flag(SName),
+                        CompactSegment = mi_segment:open_write(SName),
+
+                        %% Run the compaction...
+                        mi_segment:from_iterator(GroupIterator, CompactSegment),
+                        gen_server:cast(Pid, {compacted, CompactSegment, SegmentsToCompact, BytesToCompact, From})
+                end,
+            CompactingPid = spawn_opt(CF, [link, {fullsweep_after, 0}]),
+            {noreply, State#state { is_compacting={From, CompactingPid} }}
+    end;
 
 handle_call({info, Index, Field, Term}, _From, State) ->
     %% Calculate the IFT...
@@ -472,7 +481,8 @@ handle_cast({buffer_to_segment, Buffer, SegmentWO}, State) ->
                         },
 
             %% Give us the opportunity to do a merge...
-            SegmentsToMerge = get_segments_to_merge(NewSegments),
+            {ok, {M,F}} = application:get_env(merge_index, compact_mod_fun),
+            SegmentsToMerge = M:F(NewSegments),
             case length(SegmentsToMerge) of
                 Num when Num =< 2 orelse is_tuple(IsCompacting) ->
                     ok;
@@ -734,22 +744,6 @@ group_iterator(Iterator, eof) ->
 
 clear_deleteme_flag(Filename) ->
     file:delete(Filename ++ ?DELETEME_FLAG).
-
-%% Figure out which files to merge. Take the average of file sizes,
-%% return anything smaller than the average for merging.
-get_segments_to_merge(Segments) ->
-    %% Get all segment sizes...
-    F1 = fun(X) ->
-        Size = mi_segment:filesize(X),
-        {Size, X}
-    end,
-    SortedSizedSegments = lists:sort([F1(X) || X <- Segments]),
-
-    %% Calculate the average...
-    Avg = lists:sum([Size || {Size, _} <- SortedSizedSegments]) div length(Segments) + 1024,
-
-    %% Return segments less than average...
-    [Segment || {Size, Segment} <- SortedSizedSegments, Size < Avg].
 
 fold_itr(_Fun, Acc, eof) -> Acc;
 fold_itr(Fun, Acc, {Term, IteratorFun}) ->
