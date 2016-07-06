@@ -1,4 +1,4 @@
-.PHONY: deps test
+.PHONY: deps test xref dialyzer
 
 all: deps compile
 
@@ -16,9 +16,6 @@ distclean: clean
 
 test:
 	./rebar skip_deps=true eunit
-
-dialyzer: compile
-	./rebar dialyze
 
 docs:
 	./rebar skip_deps=true doc
